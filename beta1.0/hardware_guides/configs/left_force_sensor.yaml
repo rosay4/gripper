@@ -1,0 +1,15 @@
+left_force_sensor:
+  type: xjc
+  usb_bus: 9
+  usb_ports:
+  - 1
+  - 3
+  - 4
+  usb_index: 0
+  id: 5
+  legacy_mode: false
+  link_name: ''
+  zero_on_start: false
+  use_can_version: true
+  freq: 250
+  switch_xy: true
