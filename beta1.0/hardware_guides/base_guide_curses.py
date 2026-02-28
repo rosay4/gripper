@@ -277,11 +277,15 @@ class CursesUI:
         if fb is None:
             w.addstr(2,2,"No feedback yet")
         else:
+            field_alias = {
+                "real_distance": "夹爪间距 real distance",
+            }
             y = 1
             for k,v in vars(fb).items():
                 if y >= self.feedback_h - 1:
                     break
-                w.addstr(y,2,f"{k}:{v}")
+                label = field_alias.get(k, k)
+                w.addstr(y,2,f"{label}:{v}")
                 y += 1
         w.noutrefresh()
     

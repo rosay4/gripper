@@ -43,6 +43,7 @@ class GripperGuide(BaseGuide):
                 self.runtime = "00:00:00.000"
                 self.laser_left = None
                 self.laser_right = None
+                self.real_distance = -1
                 self.laser_status = "disabled"
                 self.laser_ports = {"left": None, "right": None}
         self.feedbackData = FeedbackItem()
@@ -66,9 +67,11 @@ class GripperGuide(BaseGuide):
                         left_val, right_val, status = self._read_lasers()
                         with self.feedback_lock:
                             if left_val is not None:
-                                self.feedbackData.laser_left = [left_val]
+                                self.feedbackData.laser_left = left_val
                             if right_val is not None:
-                                self.feedbackData.laser_right = [right_val]
+                                self.feedbackData.laser_right = right_val
+                            if left_val is not None and right_val is not None:
+                                self.feedbackData.real_distance = left_val + right_val
                             self.feedbackData.laser_status = status
                         if status.startswith("error"):
                             # drop connections to allow re-scan
