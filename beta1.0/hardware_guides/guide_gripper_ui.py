@@ -67,9 +67,9 @@ class GripperGuide(BaseGuide):
                         left_val, right_val, status = self._read_lasers()
                         with self.feedback_lock:
                             if left_val is not None:
-                                self.feedbackData.laser_left = left_val
+                                self.feedbackData.laser_left = [left_val]
                             if right_val is not None:
-                                self.feedbackData.laser_right = right_val
+                                self.feedbackData.laser_right = [right_val]
                             if left_val is not None and right_val is not None:
                                 self.feedbackData.real_distance = left_val + right_val
                             self.feedbackData.laser_status = status

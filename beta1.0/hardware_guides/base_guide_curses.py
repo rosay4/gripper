@@ -278,12 +278,17 @@ class CursesUI:
             w.addstr(2,2,"No feedback yet")
         else:
             field_alias = {
-                "real_distance": "夹爪间距 real distance",
+                "real_distance": "real distance",
             }
+            keys = list(vars(fb).keys())
+            if "real_distance" in keys:
+                keys.remove("real_distance")
+                keys.insert(0, "real_distance")
             y = 1
-            for k,v in vars(fb).items():
+            for k in keys:
                 if y >= self.feedback_h - 1:
                     break
+                v = getattr(fb, k)
                 label = field_alias.get(k, k)
                 w.addstr(y,2,f"{label}:{v}")
                 y += 1
