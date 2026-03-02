@@ -281,17 +281,23 @@ class CursesUI:
                 "real_distance": "real distance",
             }
             keys = list(vars(fb).keys())
-            if "real_distance" in keys:
-                keys.remove("real_distance")
-                keys.insert(0, "real_distance")
-            y = 1
-            for k in keys:
-                if y >= self.feedback_h - 1:
+            h, w_max = w.getmaxyx()
+            rows_per_col = max(1, h - 3)  # keep bottom row for clock
+            avail_w = max(1, w_max - 4)
+            min_col_w = 36
+            num_cols = max(1, avail_w // min_col_w)
+            col_w = max(1, avail_w // num_cols)
+
+            for idx, k in enumerate(keys):
+                col = idx // rows_per_col
+                y = 1 + (idx % rows_per_col)
+                x = 2 + col * col_w
+                if x >= w_max - 1:
                     break
                 v = getattr(fb, k)
                 label = field_alias.get(k, k)
-                w.addstr(y,2,f"{label}:{v}")
-                y += 1
+                text = f"{label}:{v}"
+                w.addstr(y, x, text[:max(1, col_w - 1)])
         w.noutrefresh()
     
     def _draw_menu(self):
