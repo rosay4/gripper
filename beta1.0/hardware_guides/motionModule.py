@@ -41,6 +41,36 @@ class MotionModule:
         self.manual_control_active = False  # 标记是否进入手动模式
         self.max_acc = 0.1
         self.max_vel = 0.1
+
+    def _coerce_scalar(self, value):
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return None
+            value = value[0]
+        if isinstance(value, np.ndarray):
+            if value.size == 0:
+                return None
+            value = value.reshape(-1)[0]
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _move_to_target(self, part: str, pos_name: str, target: float, timeout_s: float = 3.0):
+        target_arr = np.array([target], dtype=float)
+        start_time = time.monotonic()
+        while True:
+            with self.g.feedback_lock:
+                cur_q = getattr(self.g.feedbackData, pos_name)
+            if np.max(np.abs(np.array(cur_q, dtype=float) - target_arr)) <= TOL:
+                return True
+            if time.monotonic() - start_time > timeout_s:
+                return False
+            self.g.robot.set_actions({part: {"type": "position", "position": target_arr.tolist()}})
+            time.sleep(1 / CONTROL_HZ)
+
     def set_torque_mode(self,part):
         confirm = input("请在切换力矩模式前托住机械臂，否则机械臂将自由下落 (y/n): ").strip().lower()
         if confirm == "y":
@@ -430,6 +460,76 @@ class MotionModule:
         self.g.robot.send_command(part, {"command": "set_following_error_window",
                                         "value":window_list})
         self.g.loggerUI.info("已设置电机跟踪误差窗口为: "+str(window_size)+" pulses")
+
+    @hide_ui_while
+    def repeatability_position_accuracy_test(self, part: str, pos_name: str):
+        repeats = 10
+        targets = [0.0, 0.05]
+        settle_s = 1.0
+        timeout_s = 3.0
+
+        print("开始重复定位精度测试")
+        print(f"流程: {targets} 循环 {repeats} 次, 每次到位后停留 {settle_s}s 采样")
+        rows = []
+
+        for idx in range(repeats):
+            print(f"\n第 {idx + 1}/{repeats} 轮")
+            aborted = False
+            for target in targets:
+                ok = self._move_to_target(part=part, pos_name=pos_name, target=target, timeout_s=timeout_s)
+                if not ok:
+                    self.g.loggerUI.warn(f"移动到 {target} 超时, 本次测试提前结束")
+                    print(f"移动到 {target} 超时, 本次测试提前结束")
+                    aborted = True
+                    break
+
+                time.sleep(settle_s)
+                with self.g.feedback_lock:
+                    left_raw = getattr(self.g.feedbackData, "laser_left", None)
+                    right_raw = getattr(self.g.feedbackData, "laser_right", None)
+                    real_raw = getattr(self.g.feedbackData, "real_distance", None)
+
+                left_val = self._coerce_scalar(left_raw)
+                right_val = self._coerce_scalar(right_raw)
+                real_val = self._coerce_scalar(real_raw)
+                rows.append([target, left_val, right_val, real_val])
+                print(f"目标 {target:.3f} -> A:{left_val} B:{right_val} real:{real_val}")
+            if aborted:
+                break
+
+        if not rows:
+            print("没有采集到有效数据")
+            input("回车返回")
+            return
+
+        out_dir = os.path.join(project_root, "logs")
+        os.makedirs(out_dir, exist_ok=True)
+        tstamp = time.strftime("%Y%m%d_%H%M%S")
+        out_file = os.path.join(out_dir, f"repeatability_accuracy_{part}_{tstamp}.csv")
+
+        with open(out_file, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "期望夹爪距离",
+                "激光位移传感器A读数(mm)",
+                "激光位移传感器B读数(mm)",
+                "激光位移传感器行程(mm)",
+            ])
+            writer.writerows(rows)
+
+        self.g.loggerUI.info(f"重复定位精度测试完成, CSV: {out_file}")
+        print(f"\n测试完成, 已保存 CSV: {out_file}")
+        input("回车返回")
+
+    @hide_ui_while
+    def absolute_position_accuracy_test(self, part: str, pos_name: str):
+        print("绝对定位精度功能待实现")
+        input("回车返回")
+
+    @hide_ui_while
+    def one_dim_force_accuracy_test(self, part: str):
+        print("一维力精度功能待实现")
+        input("回车返回")
 
     def start_manual_control_1dof(self, data_name: str, part: str):
         self.manual_control_active = True
@@ -1085,5 +1185,3 @@ class MotionModule:
         finally:
             plt.ioff()
             plt.close(fig)
-
-

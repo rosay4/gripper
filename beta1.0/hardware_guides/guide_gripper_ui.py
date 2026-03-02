@@ -407,6 +407,31 @@ class GripperGuide(BaseGuide):
         # 使用菜单栈
         self.push_menu(menu,"夹爪运控精度测试")
 
+    def gripper_function_test(self):
+        menu = {
+            "1": {
+                "description": "重复定位精度",
+                "callback": lambda: self.motion.repeatability_position_accuracy_test(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
+            "2": {
+                "description": "绝对定位精度",
+                "callback": lambda: self.motion.absolute_position_accuracy_test(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
+            "3": {
+                "description": "一维力精度",
+                "callback": lambda: self.motion.one_dim_force_accuracy_test(
+                    part=self.selected_loadcell,
+                ),
+            },
+        }
+        self.push_menu(menu, "基础功能测试")
+
     def task_loadcell(self):
         menu = {
             "1": {
@@ -453,5 +478,6 @@ if __name__ == "__main__":
         "1":{"description":"一维力传感器设零与标定","callback":guide.task_loadcell},
         "2":{"description":"夹爪基础功能","callback":guide.gripper_basic},
         "3":{"description":"夹爪运控测试","callback":guide.gripper_motion_accuracy},
+        "4":{"description":"基础功能测试","callback":guide.gripper_function_test},
     },"主菜单")
     guide.run()
