@@ -523,7 +523,61 @@ class MotionModule:
 
     @hide_ui_while
     def absolute_position_accuracy_test(self, part: str, pos_name: str):
-        print("绝对定位精度功能待实现")
+        targets_m = [0.01, 0.02, 0.03, 0.04, 0.05]
+        settle_s = 1.0
+        timeout_s = 3.0
+
+        print("开始绝对定位精度测试")
+        print(f"目标位置: {targets_m}, 每个点到位后停留 {settle_s}s 采样")
+        rows = []
+
+        for target_m in targets_m:
+            ok = self._move_to_target(part=part, pos_name=pos_name, target=target_m, timeout_s=timeout_s)
+            if not ok:
+                self.g.loggerUI.warn(f"移动到 {target_m} 超时, 本次测试提前结束")
+                print(f"移动到 {target_m} 超时, 本次测试提前结束")
+                break
+
+            time.sleep(settle_s)
+            with self.g.feedback_lock:
+                left_raw = getattr(self.g.feedbackData, "laser_left", None)
+                right_raw = getattr(self.g.feedbackData, "laser_right", None)
+                real_raw = getattr(self.g.feedbackData, "real_distance", None)
+
+            left_val = self._coerce_scalar(left_raw)
+            right_val = self._coerce_scalar(right_raw)
+            real_val = self._coerce_scalar(real_raw)
+            expected_stroke_mm = target_m * 2000.0  # 期望行程=2*夹爪移动位置(m), 再换算为mm
+
+            rows.append([target_m, expected_stroke_mm, left_val, right_val, real_val])
+            print(
+                f"目标 {target_m:.3f}m (期望行程 {expected_stroke_mm:.3f}mm) "
+                f"-> A:{left_val} B:{right_val} real:{real_val}"
+            )
+
+        if not rows:
+            print("没有采集到有效数据")
+            input("回车返回")
+            return
+
+        out_dir = os.path.join(project_root, "logs")
+        os.makedirs(out_dir, exist_ok=True)
+        tstamp = time.strftime("%Y%m%d_%H%M%S")
+        out_file = os.path.join(out_dir, f"absolute_accuracy_{part}_{tstamp}.csv")
+
+        with open(out_file, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "期望夹移动位置(m)",
+                "期望行程(mm)",
+                "激光位移传感器A读数(mm)",
+                "激光位移传感器B读数(mm)",
+                "激光位移传感器行程(mm)",
+            ])
+            writer.writerows(rows)
+
+        self.g.loggerUI.info(f"绝对定位精度测试完成, CSV: {out_file}")
+        print(f"\n测试完成, 已保存 CSV: {out_file}")
         input("回车返回")
 
     @hide_ui_while
