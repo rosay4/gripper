@@ -12,6 +12,7 @@ import csv
 from collections import deque
 import threading
 import matplotlib.pyplot as plt
+import yaml
 MAX_POINTS = 1000
 CONTROL_HZ = 20
 TOL = 1e-3
@@ -70,6 +71,35 @@ class MotionModule:
                 return False
             self.g.robot.set_actions({part: {"type": "position", "position": target_arr.tolist()}})
             time.sleep(1 / CONTROL_HZ)
+
+    def _get_feedback_scalar(self, name: str):
+        with self.g.feedback_lock:
+            raw = getattr(self.g.feedbackData, name, None)
+        return self._coerce_scalar(raw)
+
+    def _hold_position_command(self, part: str, target: float, hold_s: float):
+        end_t = time.monotonic() + hold_s
+        cmd = [float(target)]
+        while time.monotonic() < end_t:
+            self.g.robot.set_actions({part: {"type": "position", "position": cmd}})
+            time.sleep(1 / CONTROL_HZ)
+
+    def _write_gripper_yaml_params(self, part: str, length_per_radian: float = None, offset_at_hardware_zero: float = None):
+        yaml_path = f"/opt/robot/rb_hardware/{part}.yaml"
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+
+        if length_per_radian is not None:
+            old = data.get("length_per_radian")
+            data["length_per_radian"] = [float(length_per_radian)] if isinstance(old, list) else float(length_per_radian)
+        if offset_at_hardware_zero is not None:
+            old = data.get("offset_at_hardware_zero")
+            data["offset_at_hardware_zero"] = [float(offset_at_hardware_zero)] if isinstance(old, list) else float(offset_at_hardware_zero)
+
+        with open(yaml_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+
+        return yaml_path
 
     def set_torque_mode(self,part):
         confirm = input("请在切换力矩模式前托住机械臂，否则机械臂将自由下落 (y/n): ").strip().lower()
@@ -583,6 +613,104 @@ class MotionModule:
     @hide_ui_while
     def one_dim_force_accuracy_test(self, part: str):
         print("一维力精度功能待实现")
+        input("回车返回")
+
+    @hide_ui_while
+    def calibrate_gripper_kinematic_params_auto(self, part: str, pos_name: str):
+        hold_extreme_s = 3.0
+        settle_s = 1.0
+        timeout_s = 3.0
+        open_cmd = 1.0
+        close_cmd = -0.05
+
+        print("开始夹爪参数自动矫正（自动下发版）")
+        print("步骤1: 先将yaml中的 length_per_radian=1.0, offset_at_hardware_zero=0.0")
+        try:
+            yaml_path = self._write_gripper_yaml_params(
+                part=part,
+                length_per_radian=1.0,
+                offset_at_hardware_zero=0.0,
+            )
+            self.g.loggerUI.info(f"已重置参数: {yaml_path}")
+            print(f"已重置参数: {yaml_path}")
+        except Exception as e:
+            self.g.loggerUI.error(f"重置yaml失败: {e}")
+            print(f"重置yaml失败: {e}")
+            input("回车返回")
+            return
+
+        try:
+            self.g.robot.send_command(part, {"command": "set_control_mode", "mode": "position"})
+        except Exception:
+            pass
+
+        user_hold = input("输入极限持续下发时间(秒, 默认3): ").strip()
+        if user_hold:
+            hold_extreme_s = float(user_hold)
+        user_open = input("输入张开大目标(默认1.0): ").strip()
+        if user_open:
+            open_cmd = float(user_open)
+        user_close = input("输入闭合小目标(默认-0.05): ").strip()
+        if user_close:
+            close_cmd = float(user_close)
+
+        print(f"自动张开: 持续下发目标 {open_cmd:.4f}, 持续 {hold_extreme_s}s")
+        self._hold_position_command(part=part, target=open_cmd, hold_s=hold_extreme_s)
+        time.sleep(settle_s)
+        real_distance = self._get_feedback_scalar("real_distance")
+        rad1 = self._get_feedback_scalar(pos_name)
+
+        print(f"自动闭合: 持续下发目标 {close_cmd:.4f}, 持续 {hold_extreme_s}s")
+        self._hold_position_command(part=part, target=close_cmd, hold_s=hold_extreme_s)
+        time.sleep(settle_s)
+        rad2 = self._get_feedback_scalar(pos_name)
+
+        if real_distance is None or rad1 is None or rad2 is None:
+            print("采样失败：real_distance/rad1/rad2 存在空值，终止")
+            input("回车返回")
+            return
+
+        delta_rad = abs(rad1 - rad2)
+        if delta_rad < 1e-9:
+            print("计算失败：|rad1-rad2| 过小")
+            input("回车返回")
+            return
+
+        length_per_radian = real_distance / (2000.0 * delta_rad)
+        length_per_radian_10 = round(length_per_radian, 10)
+
+        print("保持闭合，执行夹爪设零")
+        self.set_zero(part=part)
+
+        print("阶跃下发移动夹爪到 0.025")
+        move_ok = self._move_to_target(part=part, pos_name=pos_name, target=0.025, timeout_s=timeout_s)
+        if not move_ok:
+            print("移动到 0.025 超时")
+        print("执行夹爪设零")
+        self.set_zero(part=part)
+
+        offset_at_hardware_zero = 0.025
+        try:
+            yaml_path = self._write_gripper_yaml_params(
+                part=part,
+                length_per_radian=length_per_radian_10,
+                offset_at_hardware_zero=offset_at_hardware_zero,
+            )
+            self.g.loggerUI.info(
+                f"[参数矫正完成] yaml={yaml_path}, length_per_radian={length_per_radian_10:.10f}, "
+                f"offset_at_hardware_zero={offset_at_hardware_zero:.3f}, real_distance={real_distance}, "
+                f"rad1={rad1}, rad2={rad2}"
+            )
+            print(f"\n已写入yaml: {yaml_path}")
+        except Exception as e:
+            self.g.loggerUI.error(f"写入yaml失败: {e}")
+            print(f"\n写入yaml失败: {e}")
+
+        print("\n参数计算结果:")
+        print(f"length_per_radian = {length_per_radian_10:.10f}")
+        print(f"offset_at_hardware_zero = {offset_at_hardware_zero:.3f}")
+        print(f"rad1={rad1}, rad2={rad2}, real_distance={real_distance}")
+        print("提示：若下发超时后电机不再响应，建议先退出该流程再重新进入。")
         input("回车返回")
 
     def start_manual_control_1dof(self, data_name: str, part: str):

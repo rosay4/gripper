@@ -432,6 +432,12 @@ class GripperGuide(BaseGuide):
         }
         self.push_menu(menu, "基础功能测试")
 
+    def task_gripper_param_calibration(self):
+        self.motion.calibrate_gripper_kinematic_params_auto(
+            part=self.selected_gripper,
+            pos_name="gripper_pos",
+        )
+
     def task_loadcell(self):
         menu = {
             "1": {
@@ -475,9 +481,10 @@ if __name__ == "__main__":
     hblog.info("test","Gripper Guide Start")
     guide = GripperGuide()
     guide.push_menu({
-        "1":{"description":"一维力传感器设零与标定","callback":guide.task_loadcell},
-        "2":{"description":"夹爪基础功能","callback":guide.gripper_basic},
-        "3":{"description":"夹爪运控测试","callback":guide.gripper_motion_accuracy},
-        "4":{"description":"基础功能测试","callback":guide.gripper_function_test},
+        "1":{"description":"夹爪参数自动矫正","callback":guide.task_gripper_param_calibration},
+        "2":{"description":"一维力传感器设零与标定","callback":guide.task_loadcell},
+        "3":{"description":"夹爪基础功能","callback":guide.gripper_basic},
+        "4":{"description":"夹爪运控测试","callback":guide.gripper_motion_accuracy},
+        "5":{"description":"基础功能测试","callback":guide.gripper_function_test},
     },"主菜单")
     guide.run()
