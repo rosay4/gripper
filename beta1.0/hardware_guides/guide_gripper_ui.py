@@ -433,10 +433,23 @@ class GripperGuide(BaseGuide):
         self.push_menu(menu, "基础功能测试")
 
     def task_gripper_param_calibration(self):
-        self.motion.calibrate_gripper_kinematic_params_auto(
-            part=self.selected_gripper,
-            pos_name="gripper_pos",
-        )
+        menu = {
+            "1": {
+                "description": "test: 阶跃下发到0.05",
+                "callback": lambda: self.motion.gripper_calibration_motion_test(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
+            "2": {
+                "description": "run: 自动参数矫正",
+                "callback": lambda: self.motion.calibrate_gripper_kinematic_params_auto(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
+        }
+        self.push_menu(menu, "夹爪参数自动矫正")
 
     def task_loadcell(self):
         menu = {

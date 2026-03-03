@@ -101,6 +101,26 @@ class MotionModule:
 
         return yaml_path
 
+    def _set_following_error_window_value(self, part: str, window_size: int):
+        self.g.robot.send_command(
+            part,
+            {"command": "set_following_error_window", "value": [int(window_size)]},
+        )
+
+    @hide_ui_while
+    def gripper_calibration_motion_test(self, part: str, pos_name: str):
+        timeout_s = 3.0
+        target = 0.05
+        print("校准前运动测试: 阶跃下发到 0.05")
+        ok = self._move_to_target(part=part, pos_name=pos_name, target=target, timeout_s=timeout_s)
+        if ok:
+            print("测试通过：电机可运动到 0.05")
+            self.g.loggerUI.info("校准前test通过: 可运动到0.05")
+        else:
+            print("测试失败：移动到 0.05 超时")
+            self.g.loggerUI.warn("校准前test失败: 移动到0.05超时")
+        input("回车返回")
+
     def set_torque_mode(self,part):
         confirm = input("请在切换力矩模式前托住机械臂，否则机械臂将自由下落 (y/n): ").strip().lower()
         if confirm == "y":
@@ -624,6 +644,30 @@ class MotionModule:
         close_cmd = -0.05
 
         print("开始夹爪参数自动矫正（自动下发版）")
+        print("步骤0: 设置电机跟踪误差窗口为 10000000")
+        try:
+            self._set_following_error_window_value(part=part, window_size=10000000)
+            self.g.loggerUI.info("已设置跟踪误差窗口: 10000000")
+        except Exception as e:
+            self.g.loggerUI.error(f"设置跟踪误差窗口失败: {e}")
+            print(f"设置跟踪误差窗口失败: {e}")
+            input("回车返回")
+            return
+
+        print("步骤0.1: test 运动到 0.05，确认当前可动")
+        test_ok = self._move_to_target(part=part, pos_name=pos_name, target=0.05, timeout_s=timeout_s)
+        if not test_ok:
+            print("test失败：移动到0.05超时。建议先退出并重新使能后再试。")
+            self.g.loggerUI.warn("校准流程中断: test移动0.05超时")
+            input("回车返回")
+            return
+
+        limit_before = None
+        try:
+            limit_before = self.g.robot.send_command(part, {"command": "get_limit"})
+        except Exception:
+            pass
+
         print("步骤1: 先将yaml中的 length_per_radian=1.0, offset_at_hardware_zero=0.0")
         try:
             yaml_path = self._write_gripper_yaml_params(
@@ -696,12 +740,20 @@ class MotionModule:
                 length_per_radian=length_per_radian_10,
                 offset_at_hardware_zero=offset_at_hardware_zero,
             )
+            limit_after = None
+            try:
+                limit_after = self.g.robot.send_command(part, {"command": "get_limit"})
+            except Exception:
+                pass
             self.g.loggerUI.info(
                 f"[参数矫正完成] yaml={yaml_path}, length_per_radian={length_per_radian_10:.10f}, "
                 f"offset_at_hardware_zero={offset_at_hardware_zero:.3f}, real_distance={real_distance}, "
                 f"rad1={rad1}, rad2={rad2}"
             )
+            self.g.loggerUI.info(f"[limits对比] before={limit_before}, after={limit_after}")
             print(f"\n已写入yaml: {yaml_path}")
+            print(f"gripper_limits before: {limit_before}")
+            print(f"gripper_limits after : {limit_after}")
         except Exception as e:
             self.g.loggerUI.error(f"写入yaml失败: {e}")
             print(f"\n写入yaml失败: {e}")
