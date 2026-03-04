@@ -84,6 +84,19 @@ class MotionModule:
             self.g.robot.set_actions({part: {"type": "position", "position": cmd}})
             time.sleep(1 / CONTROL_HZ)
 
+    def _recover_motion_after_zero(self, part: str, pos_name: str = "gripper_pos"):
+        # Re-latch position mode and resend a short hold command to avoid
+        # post-set_zero non-responsive state seen on some drivers.
+        try:
+            self.g.robot.send_command(part, {"command": "set_control_mode", "mode": "position"})
+        except Exception:
+            pass
+        time.sleep(0.2)
+        cur = self._get_feedback_scalar(pos_name)
+        if cur is None:
+            cur = 0.0
+        self._hold_position_command(part=part, target=cur, hold_s=0.4)
+
     def _write_gripper_yaml_params(self, part: str, length_per_radian: float = None, offset_at_hardware_zero: float = None):
         yaml_path = f"/opt/robot/rb_hardware/{part}.yaml"
         with open(yaml_path, "r", encoding="utf-8") as f:
@@ -814,7 +827,8 @@ class MotionModule:
     def set_zero(self,part):
         self.g.robot.send_command(part,{"command":"set_zero"})
         time.sleep(1)
-        self.g.loggerUI.info(f"{part}已硬件设零")
+        self._recover_motion_after_zero(part=part, pos_name="gripper_pos")
+        self.g.loggerUI.info(f"{part}已硬件设零，并完成可动性恢复")
     def set_zero_loadcell(self,part:str,ch=0):
         self.g.robot.send_command(part, {"command": "calibrate_zero","index":ch}) ## index 0 for left setzero
         time.sleep(1)
