@@ -11,14 +11,14 @@ LASER_USB_SERIAL = "0123456789"
 LASER_SCAN_COOLDOWN_SEC = 2.0
 
 class FeedbackMode(Enum):
-    BASIC = auto()     # 杞ㄨ抗娴嬭瘯 / 楂橀
-    FULL = auto()      # 姝ｅ父杩愯 / 鍏ㄩ噺
+    BASIC = auto()     # 轨迹测试 / 高频
+    FULL = auto()      # 正常运行 / 全量
 class GripperGuide(BaseGuide):
     def __init__(self):
         super().__init__()
-        ## 灏嗚褰曞姛鑳藉疄鐜板垎鍒癓ogger绫?
+        ## 将记录功能实现分到Logger类
         self.logger = LogModule(self)
-        ## 灏嗚繍鍔ㄥ姛鑳藉疄鐜板垎鍒癕otion绫?
+        ## 将运动功能实现分到Motion类
         self.motion = MotionModule(self)
         ## laser
         self.laser_left = None
@@ -51,7 +51,7 @@ class GripperGuide(BaseGuide):
                 self.config_offset_at_hardware_zero = None
         self.feedbackData = FeedbackItem()
         self.feedback_mode = FeedbackMode.FULL
-    ## 鎶借薄鏂规硶瀹炵幇
+    ## 抽象方法实现
     def _get_feedback(self):
         period = 1.0 / 100.0
         next_time = time.perf_counter()
@@ -80,7 +80,7 @@ class GripperGuide(BaseGuide):
                             # drop connections to allow re-scan
                             self._disconnect_lasers()
                         self._laser_next_time = now + self.laser_read_interval
-                # 1. 鍩虹鐘舵€?
+                # 1. 基础状态
                 feed = self.robot.get_states()
                 if not feed:
                     time.sleep(0.001)
@@ -97,14 +97,14 @@ class GripperGuide(BaseGuide):
                 torque_actual = gripper_states.get("torque")
 
                 rb_t = gripper_states.get("time")
-                # 2. 鍏朵粬淇℃伅
+                # 2. 其他信息
                 if self.feedback_mode == FeedbackMode.FULL:
                     force_sensor_states = feed.get(self.selected_force_sensor, None)
                     limit_feed = self.robot.send_command(self.selected_gripper, {"command": "get_limit"})
                     window_feed = self.robot.send_command(self.selected_gripper, {"command": "get_following_error_window"})
                     block_torque_feed = self.robot.send_command(self.selected_gripper, {"command": "get_block_torque"})
                     temperature_feed = self.robot.send_command(self.selected_gripper,{"command": "get_temperature"})
-                    # 璁＄畻杩愯鏃堕棿
+                    # 计算运行时间
                     elapsed = now - start_time
                     hours = int(elapsed // 3600)
                     minutes = int((elapsed % 3600) // 60)
@@ -149,7 +149,7 @@ class GripperGuide(BaseGuide):
                 next_time += period
             except Exception as e:
                 self.loggerUI.error(f"feedback error:{e}")
-                # 缁欑郴缁熶竴鐐圭紦鍐叉椂闂达紝閬垮厤寮傚父鐙傚埛
+                # 给系统一点缓冲时间，避免异常狂刷
                 time.sleep(0.1)
 
     def _coerce_cfg_scalar(self, value):
@@ -198,7 +198,7 @@ class GripperGuide(BaseGuide):
             while True:
                 win.erase()
                 win.box()
-                win.addstr(0,2,"閫夋嫨澶圭埅")
+                win.addstr(0,2,"选择夹爪")
                 for i,opt in enumerate(opts):
                     if i == selected_idx:
                         win.attron(curses.A_REVERSE)
@@ -238,8 +238,8 @@ class GripperGuide(BaseGuide):
             "robot_model":""
         })
         self.config = MyRobot
-        self.loggerUI.info(f"宸查€夋嫨澶圭埅: {self.selected_gripper}")
-        self.loggerUI.info(f"宸插姞杞介厤缃枃浠? {gripper_path}, {loadcell_path}, {force_sensor_path}")
+        self.loggerUI.info(f"已选择夹爪: {self.selected_gripper}")
+        self.loggerUI.info(f"已加载配置文件: {gripper_path}, {loadcell_path}, {force_sensor_path}")
         self._sync_gripper_yaml_config_to_feedback()
         self._init_lasers()
 
@@ -401,17 +401,17 @@ class GripperGuide(BaseGuide):
         key_path = self.selected_gripper + ".invert_directions"
         menu = {
             "1": {
-                "description": "闃惰穬涓嬪彂绉诲姩澶圭埅",
+                "description": "阶跃下发移动夹爪",
                 "callback": lambda: self.motion._run_point_with_input(q_name="gripper_pos",
                                                               dof=len(self.feedbackData.gripper_pos),
                                                               part=self.selected_gripper),
             },
             "2": {
-                "description": "TOPP杞ㄨ抗鍙傛暟淇敼",
+                "description": "TOPP轨迹参数修改",
                 "callback": lambda: self.motion.set_max_vel_acc(),
             },
             "3": {
-                "description": "TOPP杞ㄨ抗涓嬪彂娴嬭瘯",
+                "description": "TOPP轨迹下发测试",
                 "callback": lambda: self.motion.cubic_move(start_data=self.feedbackData.gripper_pos,
                                                            max_vel=[self.motion.max_vel],
                                                            max_acc=[self.motion.max_acc],
@@ -420,41 +420,41 @@ class GripperGuide(BaseGuide):
                                                            dof=len(self.feedbackData.gripper_pos)),
             },
             "4": {
-                "description": "鐐规寜鎿嶄綔妯″紡",
+                "description": "点按操作模式",
                 "callback": lambda: self.motion.start_manual_control_1dof(data_name="gripper_pos",
                                                                      part=self.selected_gripper),
             },
             "5": {
-                "description": "澶圭埅璁鹃浂",
+                "description": "夹爪设零",
                 "callback": lambda: self.motion.set_zero(part=self.selected_gripper)
             },
             "6": {
-                "description": "鏇存敼杩愬姩涓婁笅闄?,
+                "description": "更改运动上下限",
                 "callback": lambda: self.motion.set_limits(part=self.selected_gripper),
             },
             "7": {
-                "description": "璁剧疆鐢垫満璺熻釜绐楀彛",
+                "description": "设置电机跟踪窗口",
                 "callback": lambda: self.motion.set_following_error_window(part=self.selected_gripper),
             },
             "8": {
-                "description": "鎭㈠鍙姩鎬?,
+                "description": "恢复可动性",
                 "callback": lambda: self.motion.recover_mobility(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
         }
-        # 浣跨敤鑿滃崟鏍?
-        self.push_menu(menu,"澶圭埅鍩虹鍔熻兘")
+        # 使用菜单栈
+        self.push_menu(menu,"夹爪基础功能")
     
     def gripper_motion_accuracy(self):
         menu = {
             "1": {
-                "description": "TOPP杞ㄨ抗鍙傛暟淇敼",
+                "description": "TOPP轨迹参数修改",
                 "callback": lambda: self.motion.set_max_vel_acc(),
             },
             "2": {
-                "description": "TOPP杞ㄨ抗璺熻釜娴嬭瘯",
+                "description": "TOPP轨迹跟踪测试",
                 "callback": lambda: self.motion.cubic_move_record(start_data=self.feedbackData.gripper_pos,
                                                            max_vel=[self.motion.max_vel],
                                                            max_acc=[self.motion.max_acc],
@@ -463,72 +463,72 @@ class GripperGuide(BaseGuide):
                                                            dof=len(self.feedbackData.gripper_pos)),
             },
             "3":{
-                "description": "闃惰穬涓嬪彂鎺у埗娴嬭瘯",
+                "description": "阶跃下发控制测试",
                 "callback": lambda: self.motion.step_move_record(part=self.selected_gripper,
                                                           pos_name="gripper_pos"),
             },
             "4":{
-                "description": "绌鸿浇杩炵画杩愬姩娴嬭瘯",
+                "description": "空载连续运动测试",
                 "callback": lambda: self.motion.step_move_repetitively(part=self.selected_gripper,
                                                             pos_name="gripper_pos"),
             },
             "5":{
-                "description": "鍫佃浆鎶撳彇绋冲畾娴嬭瘯",
+                "description": "堵转抓取稳定测试",
                 "callback": lambda: self.motion.grasp_test(part=self.selected_gripper,
                                                             pos_name="gripper_pos")
             },
             "6": {
-                "description": "闆嗘垚鎶撳彇缁煎悎娴嬭瘯",
+                "description": "集成抓取综合测试",
                 "callback": lambda: self.motion.integrity_test(part=self.selected_gripper,
                                                             pos_name="gripper_pos")
             }
         }
-        # 浣跨敤鑿滃崟鏍?
-        self.push_menu(menu,"澶圭埅杩愭帶绮惧害娴嬭瘯")
+        # 使用菜单栈
+        self.push_menu(menu,"夹爪运控精度测试")
 
     def gripper_function_test(self):
         menu = {
             "1": {
-                "description": "閲嶅瀹氫綅绮惧害",
+                "description": "重复定位精度",
                 "callback": lambda: self.motion.repeatability_position_accuracy_test(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
             "2": {
-                "description": "缁濆瀹氫綅绮惧害",
+                "description": "绝对定位精度",
                 "callback": lambda: self.motion.absolute_position_accuracy_test(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
             "3": {
-                "description": "涓€缁村姏绮惧害",
+                "description": "一维力精度",
                 "callback": lambda: self.motion.one_dim_force_accuracy_test(
                     part=self.selected_loadcell,
                 ),
             },
         }
-        self.push_menu(menu, "鍩虹鍔熻兘娴嬭瘯")
+        self.push_menu(menu, "基础功能测试")
 
     def task_gripper_param_calibration(self):
         menu = {
             "1": {
-                "description": "test: step to 0.05",
+                "description": "test: 阶跃下发到0.05",
                 "callback": lambda: self.motion.gripper_calibration_motion_test(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
             "2": {
-                "description": "run: auto calibration",
+                "description": "run: 自动参数矫正",
                 "callback": lambda: self.motion.calibrate_gripper_kinematic_params_auto(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
             "3": {
-                "description": "set: following_error_window=10000000",
+                "description": "set: 跟踪误差窗口=10000000",
                 "callback": lambda: self.motion.set_following_error_window_10000000(
                     part=self.selected_gripper,
                 ),
@@ -544,28 +544,28 @@ class GripperGuide(BaseGuide):
                 "callback": self.motion.set_manual_control_step,
             },
         }
-        self.push_menu(menu, "gripper calibration")
+        self.push_menu(menu, "夹爪参数自动矫正")
 
     def task_loadcell(self):
         menu = {
             "1": {
-                "description": "涓€缁村姏浼犳劅鍣ㄩ€氶亾0缃浂", 
+                "description": "一维力传感器通道0置零", 
                 "callback": lambda: self.motion.set_zero_loadcell(part=self.selected_loadcell,ch=0),
             },
             "2": {
-                "description": "涓€缁村姏浼犳劅鍣ㄩ€氶亾1缃浂", 
+                "description": "一维力传感器通道1置零", 
                 "callback": lambda: self.motion.set_zero_loadcell(part=self.selected_loadcell,ch=1),
             },
             "3":{
-                "description": "涓€缁村姏浼犳劅鍣ㄩ€氶亾0鏍囧畾",
+                "description": "一维力传感器通道0标定",
                 "callback": lambda: self.motion.calibrate_loadcell(part=self.selected_loadcell,ch=0),
             },
             "4":{
-                "description": "涓€缁村姏浼犳劅鍣ㄩ€氶亾1鏍囧畾",
+                "description": "一维力传感器通道1标定",
                 "callback": lambda: self.motion.calibrate_loadcell(part=self.selected_loadcell,ch=1),
             },
         }
-        self.push_menu(menu,"涓€缁村姏浼犳劅鍣ㄨ闆朵笌鏍囧畾")
+        self.push_menu(menu,"一维力传感器设零与标定")
 
 if __name__ == "__main__":
     config = {
@@ -589,11 +589,10 @@ if __name__ == "__main__":
     hblog.info("test","Gripper Guide Start")
     guide = GripperGuide()
     guide.push_menu({
-        "1":{"description":"澶圭埅鍙傛暟鑷姩鐭","callback":guide.task_gripper_param_calibration},
-        "2":{"description":"涓€缁村姏浼犳劅鍣ㄨ闆朵笌鏍囧畾","callback":guide.task_loadcell},
-        "3":{"description":"澶圭埅鍩虹鍔熻兘","callback":guide.gripper_basic},
-        "4":{"description":"澶圭埅杩愭帶娴嬭瘯","callback":guide.gripper_motion_accuracy},
-        "5":{"description":"鍩虹鍔熻兘娴嬭瘯","callback":guide.gripper_function_test},
-    },"涓昏彍鍗?)
+        "1":{"description":"夹爪参数自动矫正","callback":guide.task_gripper_param_calibration},
+        "2":{"description":"一维力传感器设零与标定","callback":guide.task_loadcell},
+        "3":{"description":"夹爪基础功能","callback":guide.gripper_basic},
+        "4":{"description":"夹爪运控测试","callback":guide.gripper_motion_accuracy},
+        "5":{"description":"基础功能测试","callback":guide.gripper_function_test},
+    },"主菜单")
     guide.run()
-
