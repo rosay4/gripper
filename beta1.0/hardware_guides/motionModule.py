@@ -514,7 +514,7 @@ class MotionModule:
     @hide_ui_while
     def repeatability_position_accuracy_test(self, part: str, pos_name: str):
         repeats = 10
-        targets = [0.0, 0.05]
+        targets = [0.005, 0.045]
         settle_s = 1.0
         timeout_s = 3.0
 
@@ -573,7 +573,7 @@ class MotionModule:
 
     @hide_ui_while
     def absolute_position_accuracy_test(self, part: str, pos_name: str):
-        targets_m = [0.01, 0.02, 0.03, 0.04, 0.05]
+        targets_m = [0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05]
         settle_s = 1.0
         timeout_s = 3.0
 
