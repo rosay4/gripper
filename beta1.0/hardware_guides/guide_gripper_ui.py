@@ -527,6 +527,12 @@ class GripperGuide(BaseGuide):
                     pos_name="gripper_pos",
                 ),
             },
+            "3": {
+                "description": "set: 跟踪误差窗口=10000000",
+                "callback": lambda: self.motion.set_following_error_window_10000000(
+                    part=self.selected_gripper,
+                ),
+            },
         }
         self.push_menu(menu, "夹爪参数自动矫正")
 

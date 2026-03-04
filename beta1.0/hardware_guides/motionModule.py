@@ -525,6 +525,75 @@ class MotionModule:
         self.g.loggerUI.info("已设置电机跟踪误差窗口为: "+str(window_size)+" pulses")
 
     @hide_ui_while
+    def set_following_error_window_10000000(self, part: str):
+        self._set_following_error_window_value(part=part, window_size=10000000)
+        self.g.loggerUI.info("已设置跟踪误差窗口: 10000000")
+        print("已设置跟踪误差窗口: 10000000")
+        input("回车返回")
+
+    @hide_ui_while
+    def manual_calibration_reset_yaml_and_reload(self, part: str, pos_name: str = "gripper_pos"):
+        print("Step 1: reset yaml params to length_per_radian=1.0, offset_at_hardware_zero=0.0")
+        try:
+            yaml_path = self._write_gripper_yaml_params(
+                part=part,
+                length_per_radian=1.0,
+                offset_at_hardware_zero=0.0,
+            )
+            self.g.loggerUI.info(f"yaml reset done: {yaml_path}")
+            print(f"yaml reset done: {yaml_path}")
+        except Exception as e:
+            self.g.loggerUI.error(f"yaml reset failed: {e}")
+            print(f"yaml reset failed: {e}")
+            input("Press Enter to return")
+            return
+
+        if hasattr(self.g, "reload_robot_from_yaml"):
+            try:
+                self.g.reload_robot_from_yaml()
+                self.g.loggerUI.info("robot reload after yaml reset done")
+                print("robot reload done")
+            except Exception as e:
+                self.g.loggerUI.error(f"robot reload failed: {e}")
+                print(f"robot reload failed: {e}")
+                input("Press Enter to return")
+                return
+        else:
+            self.g.loggerUI.warn("reload_robot_from_yaml() not found, restart guide manually")
+            print("reload function not found, please restart guide manually")
+
+        input("Press Enter to return")
+
+    @hide_ui_while
+    def manual_calibration_open_to_max(self, part: str, pos_name: str = "gripper_pos"):
+        upper = None
+        try:
+            limit_feed = self.g.robot.send_command(part, {"command": "get_limit"})
+            upper = self._coerce_scalar(limit_feed.get("upper") if isinstance(limit_feed, dict) else None)
+        except Exception as e:
+            self.g.loggerUI.warn(f"get_limit failed: {e}")
+
+        default_target = upper if upper is not None else 1.0
+        raw_target = input(f"open target (default {default_target:.6f}): ").strip()
+        target = float(raw_target) if raw_target else float(default_target)
+
+        raw_hold = input("hold seconds at open target (default 3.0): ").strip()
+        hold_s = float(raw_hold) if raw_hold else 3.0
+
+        try:
+            self.g.robot.send_command(part, {"command": "set_control_mode", "mode": "position"})
+        except Exception:
+            pass
+
+        print(f"open gripper to {target:.6f}, hold {hold_s:.2f}s")
+        self._hold_position_command(part=part, target=target, hold_s=hold_s)
+
+        cur = self._get_feedback_scalar(pos_name)
+        self.g.loggerUI.info(f"manual open done: target={target:.6f}, current={cur}")
+        print(f"manual open done, current pos={cur}")
+        input("Press Enter to return")
+
+    @hide_ui_while
     def recover_mobility(self, part: str, pos_name: str = "gripper_pos"):
         print("Recovery: try to restore gripper mobility")
         try:
