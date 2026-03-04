@@ -1,4 +1,4 @@
-import os 
+﻿import os 
 import time
 import numpy as np
 import sys
@@ -39,7 +39,8 @@ def hide_ui_while(func):
 class MotionModule:
     def __init__(self,guide):
         self.g = guide
-        self.manual_control_active = False  # 标记是否进入手动模式
+        self.manual_control_active = False
+        self.manual_control_step = 0.0005
         self.max_acc = 0.1
         self.max_vel = 0.1
 
@@ -879,13 +880,27 @@ class MotionModule:
         self.manual_control_active = False
         self.g.loggerUI.info("退出1D手动控制模式")
 
+    @hide_ui_while
+    def set_manual_control_step(self):
+        raw = input(f"输入点按步长(当前 {self.manual_control_step:.6f}): ").strip()
+        if not raw:
+            return
+        step = float(raw)
+        if step <= 0:
+            print("步长必须大于0")
+            input("回车返回")
+            return
+        self.manual_control_step = step
+        self.g.loggerUI.info(f"点按步长已设置: {self.manual_control_step:.6f}")
+        print(f"点按步长已设置: {self.manual_control_step:.6f}")
+        input("回车返回")
     def manual_control_1dof_step(self):
         """UI每帧调用一次"""
         if not self.manual_control_active:
             return
         data_name = self.manual_data_name
         part = self.manual_part
-        step = 0.0005
+        step = float(self.manual_control_step)
         key = None
         try:
             ch = self.g.ui.win_menu.getch()
