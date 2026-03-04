@@ -525,6 +525,28 @@ class MotionModule:
         self.g.loggerUI.info("已设置电机跟踪误差窗口为: "+str(window_size)+" pulses")
 
     @hide_ui_while
+    def recover_mobility(self, part: str, pos_name: str = "gripper_pos"):
+        print("Recovery: try to restore gripper mobility")
+        try:
+            self.g.robot.send_command(part, {"command": "set_control_mode", "mode": "position"})
+        except Exception as e:
+            self.g.loggerUI.warn(f"set_control_mode(position) failed: {e}")
+
+        cur = self._get_feedback_scalar(pos_name)
+        if cur is None:
+            cur = 0.0
+
+        self._hold_position_command(part=part, target=cur, hold_s=0.4)
+
+        jog = 0.0005
+        for target in (cur + jog, cur - jog, cur):
+            self._hold_position_command(part=part, target=target, hold_s=0.2)
+
+        self.g.loggerUI.info(f"{part} recover mobility done @ {cur:.6f}")
+        print("Recovery done")
+        input("Press Enter to return")
+
+    @hide_ui_while
     def repeatability_position_accuracy_test(self, part: str, pos_name: str):
         repeats = 10
         targets = [0.005, 0.045]

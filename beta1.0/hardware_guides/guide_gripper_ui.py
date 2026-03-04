@@ -363,7 +363,14 @@ class GripperGuide(BaseGuide):
             "7": {
                 "description": "设置电机跟踪窗口",
                 "callback": lambda: self.motion.set_following_error_window(part=self.selected_gripper),
-            }
+            },
+            "8": {
+                "description": "恢复可动性",
+                "callback": lambda: self.motion.recover_mobility(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
         }
         # 使用菜单栈
         self.push_menu(menu,"夹爪基础功能")
