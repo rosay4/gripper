@@ -5,6 +5,7 @@ import time
 import hblog
 import os
 import re
+import textwrap
 cur_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(cur_dir)
 # 新 FPS 格式
@@ -284,20 +285,55 @@ class CursesUI:
             h, w_max = w.getmaxyx()
             rows_per_col = max(1, h - 3)  # keep bottom row for clock
             avail_w = max(1, w_max - 4)
-            min_col_w = 36
-            num_cols = max(1, avail_w // min_col_w)
-            col_w = max(1, avail_w // num_cols)
+            items = []
+            for k in keys:
+                v = getattr(fb, k)
+                if k == "real_distance" and not isinstance(v, (list, tuple)):
+                    v = [v]
+                elif k == "gripper_limits" and isinstance(v, (list, tuple)) and len(v) >= 2:
+                    try:
+                        v = [round(float(v[0]), 3), round(float(v[1]), 3)]
+                    except Exception:
+                        pass
+                label = field_alias.get(k, k)
+                items.append(f"{label}:{v}")
 
-            for idx, k in enumerate(keys):
-                col = idx // rows_per_col
-                y = 1 + (idx % rows_per_col)
-                x = 2 + col * col_w
+            # Choose a column count that minimizes truncation for long fields.
+            max_cols = max(1, min(len(items), avail_w // 24))
+            best_cols = 1
+            for cols in range(1, max_cols + 1):
+                col_w = max(1, avail_w // cols)
+                inner_w = max(8, col_w - 1)
+                total_lines = 0
+                for text in items:
+                    total_lines += max(
+                        1,
+                        len(textwrap.wrap(text, width=inner_w, break_long_words=True, break_on_hyphens=False)),
+                    )
+                needed_cols = (total_lines + rows_per_col - 1) // rows_per_col
+                if needed_cols <= cols:
+                    best_cols = cols
+                    break
+
+            num_cols = best_cols
+            col_w = max(1, avail_w // num_cols)
+            inner_w = max(8, col_w - 1)
+
+            col = 0
+            y = 1
+            for text in items:
+                wrapped = textwrap.wrap(text, width=inner_w, break_long_words=True, break_on_hyphens=False) or [""]
+                for line in wrapped:
+                    if y > rows_per_col:
+                        col += 1
+                        y = 1
+                    x = 2 + col * col_w
+                    if x >= w_max - 1:
+                        break
+                    w.addstr(y, x, line[:inner_w])
+                    y += 1
                 if x >= w_max - 1:
                     break
-                v = getattr(fb, k)
-                label = field_alias.get(k, k)
-                text = f"{label}:{v}"
-                w.addstr(y, x, text[:max(1, col_w - 1)])
         w.noutrefresh()
     
     def _draw_menu(self):
