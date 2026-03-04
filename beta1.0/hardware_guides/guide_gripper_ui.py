@@ -2,6 +2,7 @@ from prelude import *
 from enum import Enum, auto
 import serial
 import serial.tools.list_ports
+import yaml
 from laser_indicator import LaserIndicator
 # Laser USB identifiers (from your device list)
 LASER_USB_VID = 6790
@@ -46,6 +47,8 @@ class GripperGuide(BaseGuide):
                 self.real_distance = -1
                 self.laser_status = "disabled"
                 self.laser_ports = {"left": None, "right": None}
+                self.config_length_per_radian = None
+                self.config_offset_at_hardware_zero = None
         self.feedbackData = FeedbackItem()
         self.feedback_mode = FeedbackMode.FULL
     ## 抽象方法实现
@@ -148,6 +151,33 @@ class GripperGuide(BaseGuide):
                 self.loggerUI.error(f"feedback error:{e}")
                 # 给系统一点缓冲时间，避免异常狂刷
                 time.sleep(0.1)
+
+    def _coerce_cfg_scalar(self, value):
+        if isinstance(value, list):
+            if not value:
+                return None
+            value = value[0]
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _sync_gripper_yaml_config_to_feedback(self):
+        yaml_path = f"/opt/robot/rb_hardware/{self.selected_gripper}.yaml"
+        length_val = None
+        offset_val = None
+        try:
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            length_val = self._coerce_cfg_scalar(data.get("length_per_radian"))
+            offset_val = self._coerce_cfg_scalar(data.get("offset_at_hardware_zero"))
+        except Exception as e:
+            self.loggerUI.warn(f"read yaml params failed: {e}")
+
+        with self.feedback_lock:
+            self.feedbackData.config_length_per_radian = length_val
+            self.feedbackData.config_offset_at_hardware_zero = offset_val
+
     def _load_config(self):
         opts = ["left_gripper","right_gripper"]
         opts_loadcell = ["left_loadcell","right_loadcell"]
@@ -210,7 +240,49 @@ class GripperGuide(BaseGuide):
         self.config = MyRobot
         self.loggerUI.info(f"已选择夹爪: {self.selected_gripper}")
         self.loggerUI.info(f"已加载配置文件: {gripper_path}, {loadcell_path}, {force_sensor_path}")
+        self._sync_gripper_yaml_config_to_feedback()
         self._init_lasers()
+
+    def _rebuild_config_from_selected(self):
+        gripper_path = str(f"/opt/robot/rb_hardware/{self.selected_gripper}.yaml")
+        loadcell_path = str(f"/opt/robot/rb_hardware/{self.selected_loadcell}.yaml")
+        force_sensor_path = str(f"/opt/robot/rb_hardware/{self.selected_force_sensor}.yaml")
+        my_gripper = GripperConfig.create(gripper_path)
+        my_loadcell = LoadcellConfig.create(loadcell_path)
+        my_force_sensor = ForceSensorConfig.create(force_sensor_path)
+        my_hardware = HardwareConfig.create_from_container(
+            {
+                self.selected_gripper: my_gripper,
+                self.selected_loadcell: my_loadcell,
+                self.selected_force_sensor: my_force_sensor,
+            }
+        )
+        self.config = RobotConfig.recreate(
+            {
+                "hardware": my_hardware.to_dict_container(),
+                "planner": None,
+                "robot_model": "",
+            }
+        )
+        self.loggerUI.info(
+            f"reloaded config files: {gripper_path}, {loadcell_path}, {force_sensor_path}"
+        )
+        self._sync_gripper_yaml_config_to_feedback()
+
+    def reload_robot_from_yaml(self):
+        self.loggerUI.info("reloading robot from current yaml")
+        self.stop_feedback_thread()
+        try:
+            if self.robot is not None:
+                self.robot.shutdown()
+                time.sleep(0.2)
+        except Exception as e:
+            self.loggerUI.warn(f"old robot shutdown failed: {e}")
+
+        self._rebuild_config_from_selected()
+        self._init_robot()
+        self.start_feedback_thread()
+        self.loggerUI.info("robot reload done")
 
     def _scan_laser_ports(self):
         ports = list(serial.tools.list_ports.comports())
