@@ -633,10 +633,10 @@ class MotionModule:
         last_actual_pos = start_pos
         stable_count = 0
         
-        # 激光距离阈值（用于调整步长）
-        LASER_THRESHOLD_OPEN = 0.095   # 张开时激光距离小于95mm时减速
-        LASER_THRESHOLD_CLOSE = 0.005  # 闭合时激光距离小于5mm时减速
-        STEP_REDUCTION_FACTOR = 0.3    # 减速因子
+        # 激光距离阈值（用于调整步长）- 注意：激光数据单位是mm
+        LASER_THRESHOLD_OPEN = 90.0    # 张开时激光距离大于90mm时减速（接近100mm的极限）
+        LASER_THRESHOLD_CLOSE = 5.0    # 闭合时激光距离小于5mm时减速（接近0mm的极限）
+        STEP_REDUCTION_FACTOR = 0.2    # 减速因子（步长变为原来的20%，更精细）
         
         print(f"    起始位置: {start_pos:.6f}")
         print("    开始位置爬坡... (按Ctrl+C可中断)")
@@ -652,23 +652,23 @@ class MotionModule:
                 
                 # 根据激光距离调整步长
                 if real_distance is not None:
-                    if direction_sign == 1:  # 张开
-                        if real_distance < LASER_THRESHOLD_OPEN:
+                    if direction_sign == 1:  # 张开 - 激光值越大表示越张开
+                        if real_distance > LASER_THRESHOLD_OPEN:  # 接近100mm极限
                             if not slowdown_active:
                                 current_step = base_step * STEP_REDUCTION_FACTOR
                                 slowdown_active = True
-                                print(f"    ↓ 接近极限，步长减小至 {current_step:.6f} (激光: {real_distance:.4f}m)")
+                                print(f"    ↓ 接近张开极限，步长减小至 {current_step:.6f} (激光: {real_distance:.1f}mm)")
                         else:
                             if slowdown_active:
                                 current_step = base_step
                                 slowdown_active = False
                                 print(f"    ↑ 恢复正常步长 {current_step:.6f}")
-                    else:  # 闭合
-                        if real_distance < LASER_THRESHOLD_CLOSE:
+                    else:  # 闭合 - 激光值越小表示越闭合
+                        if real_distance < LASER_THRESHOLD_CLOSE:  # 接近0mm极限
                             if not slowdown_active:
                                 current_step = base_step * STEP_REDUCTION_FACTOR
                                 slowdown_active = True
-                                print(f"    ↓ 接近极限，步长减小至 {current_step:.6f} (激光: {real_distance:.4f}m)")
+                                print(f"    ↓ 接近闭合极限，步长减小至 {current_step:.6f} (激光: {real_distance:.1f}mm)")
                         else:
                             if slowdown_active:
                                 current_step = base_step
@@ -699,7 +699,7 @@ class MotionModule:
                 current_time = time.time()
                 if current_time - last_print_time >= 0.5:
                     elapsed = current_time - start_time
-                    laser_str = f", 激光: {real_distance:.4f}" if real_distance is not None else ""
+                    laser_str = f", 激光: {real_distance:.1f}mm" if real_distance is not None else ""
                     step_str = f", 步长: {current_step:.6f}" if slowdown_active else ""
                     print(f"    [{elapsed:5.1f}s] 位置: {current_actual_pos:8.6f}, "
                           f"指令: {command_pos:8.6f}, 稳定计数: {stable_count:2d}/{stable_target}{laser_str}{step_str}")
