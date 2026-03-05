@@ -565,36 +565,20 @@ class GripperGuide(BaseGuide):
                 ),
             },
             "9": {
-                "description": "【阶段1】方案C: 暂停模式张开(记录rad1+laser)",
-                "callback": lambda: self.motion.pause_and_manual_adjust(
-                    part=self.selected_gripper,
-                    pos_name="gripper_pos",
-                    direction="open",
-                ),
-            },
-            "10": {
                 "description": "【阶段1】方案A: 点动闭合(记录rad2+laser)",
                 "callback": lambda: self.motion.manual_close_by_step_to_min(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "11": {
+            "10": {
                 "description": "【阶段1】方案B: 自动闭合(记录rad2+laser)",
                 "callback": lambda: self.motion.auto_close_to_min(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "12": {
-                "description": "【阶段1】方案C: 暂停模式闭合(记录rad2+laser)",
-                "callback": lambda: self.motion.pause_and_manual_adjust(
-                    part=self.selected_gripper,
-                    pos_name="gripper_pos",
-                    direction="close",
-                ),
-            },
-            "13": {
+            "11": {
                 "description": "【阶段1】计算并写入length_per_radian",
                 "callback": lambda: self.motion.calculate_and_write_length_per_radian(
                     part=self.selected_gripper,

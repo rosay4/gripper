@@ -244,6 +244,14 @@ class CursesUI:
                 self._draw_hblog()
                 curses.doupdate()
                 self.guide.motion.manual_control_1dof_step()
+                
+                # 标定专用的手动控制步进函数
+                if hasattr(self.guide.motion, '_calib_manual_active') and self.guide.motion._calib_manual_active:
+                    mode = getattr(self.guide.motion, '_calib_mode', 'open')
+                    if mode == 'open':
+                        self.guide.motion.calibration_manual_open_step()
+                    elif mode == 'close':
+                        self.guide.motion.calibration_manual_close_step()
 
             self._handle_input()
             time.sleep(0.1)
@@ -376,9 +384,11 @@ class CursesUI:
         current_page_items = menu_items[start_idx:end_idx]
 
         y = 1
-        # 显示当前页的菜单项
-        for key, item in current_page_items:
-            text = f"[{key}] {item.get('description','')}"
+        # 显示当前页的菜单项（重新编号为1-8，但保留原始key用于回调）
+        self._current_page_key_map = {}  # 存储当前页的编号到原始key的映射
+        for display_idx, (original_key, item) in enumerate(current_page_items, start=1):
+            self._current_page_key_map[str(display_idx)] = original_key
+            text = f"[{display_idx}] {item.get('description','')}"
             try:
                 w.addstr(y, 2, text[:w.getmaxyx()[1]-4])
             except curses.error as e:
@@ -591,8 +601,14 @@ class CursesUI:
                 curses.doupdate()
             return
         title,menu = self.guide.menu_stack[-1]
-        if key in menu:
-            cb = menu[key].get("callback")
+        
+        # 检查是否有分页映射，如果有则转换key
+        original_key = key
+        if hasattr(self, '_current_page_key_map') and key in self._current_page_key_map:
+            original_key = self._current_page_key_map[key]
+        
+        if original_key in menu:
+            cb = menu[original_key].get("callback")
             if callable(cb):
                 try:
                     cb()

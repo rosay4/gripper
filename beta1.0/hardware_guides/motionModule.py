@@ -619,41 +619,58 @@ class MotionModule:
     @hide_ui_while
     def auto_open_to_max(self, part: str, pos_name: str = "gripper_pos"):
         """
-        自动持续张开夹爪到最大位置
-        使用位置变化判断或电机状态判断
+        自动持续张开夹爪到最大位置 - 方案选择菜单
         """
-        print("=== 自动张开夹爪到最大 ===")
-        print("判断条件: 连续5次位置变化<0.0001 或 电机堵转")
+        print("=== 自动张开夹爪到最大 - 选择方案 ===")
+        print("1. 方案1: 基于位置变化检测")
+        print("2. 方案2: 基于时间限制（固定时间后停止）")
+        print("3. 方案3: 基于电机堵转/力矩异常检测")
+        
+        choice = input("选择方案 (1/2/3): ").strip()
+        
+        if choice == "1":
+            return self._auto_open_by_position_change(part, pos_name)
+        elif choice == "2":
+            return self._auto_open_by_time_limit(part, pos_name)
+        elif choice == "3":
+            return self._auto_open_by_stall_detection(part, pos_name)
+        else:
+            print("无效选择")
+            input("按回车返回")
+            return None
+
+    @hide_ui_while
+    def _auto_open_by_position_change(self, part: str, pos_name: str = "gripper_pos"):
+        """
+        方案1: 基于位置变化检测自动张开
+        当连续多次位置变化小于阈值时停止
+        """
+        print("=== 方案1: 基于位置变化检测自动张开 ===")
         
         step = self.manual_control_step
-        check_interval = 0.1  # 检测间隔100ms
+        check_interval = 0.1
         stable_threshold = 0.0001
         stable_count_required = 5
-        max_duration = 30.0  # 最大30秒
+        max_duration = 30.0
         
         print(f"步长: {step:.6f}, 检测间隔: {check_interval}s")
-        input("按回车开始自动张开...")
+        print(f"停止条件: 连续{stable_count_required}次位置变化<{stable_threshold}")
+        input("按回车开始...")
         
         start_time = time.time()
-        last_pos = None
         stable_count = 0
         positions_history = []
         
         print("开始自动张开...")
         while time.time() - start_time < max_duration:
-            # 获取当前位置
             cur = self._get_feedback_scalar(pos_name)
             if cur is None:
                 print("无法获取当前位置")
                 break
             
-            # 计算新位置
             new_pos = cur + step
-            
-            # 下发命令
             self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
             
-            # 等待并检测
             time.sleep(check_interval)
             actual = self._get_feedback_scalar(pos_name)
             
@@ -662,24 +679,113 @@ class MotionModule:
                 if len(positions_history) > stable_count_required:
                     positions_history.pop(0)
                 
-                # 检查是否稳定
                 if len(positions_history) >= stable_count_required:
                     max_diff = max(positions_history) - min(positions_history)
                     if max_diff < stable_threshold:
                         print(f"位置已稳定，变化量: {max_diff:.6f}")
                         stable_count += 1
-                        if stable_count >= 3:  # 连续3次稳定
+                        if stable_count >= 3:
                             print("检测到夹爪已到达最大位置")
                             break
                     else:
                         stable_count = 0
                 
-                # 显示进度
                 if int((time.time() - start_time) * 10) % 10 == 0:
-                    print(f"当前位置: {actual:.6f}, 历史变化: {max(positions_history)-min(positions_history):.6f if positions_history else 0:.6f}")
+                    print(f"当前位置: {actual:.6f}")
         
-        # 稳定2秒后读取数据
-        print("稳定2秒后读取数据...")
+        return self._record_and_return_open_data(pos_name)
+
+    @hide_ui_while
+    def _auto_open_by_time_limit(self, part: str, pos_name: str = "gripper_pos"):
+        """
+        方案2: 基于时间限制自动张开
+        固定时间后停止
+        """
+        print("=== 方案2: 基于时间限制自动张开 ===")
+        
+        step = self.manual_control_step
+        check_interval = 0.1
+        run_duration = 10.0  # 固定运行10秒
+        
+        print(f"步长: {step:.6f}, 运行时间: {run_duration}s")
+        input("按回车开始...")
+        
+        start_time = time.time()
+        
+        print(f"开始自动张开，将持续{run_duration}秒...")
+        while time.time() - start_time < run_duration:
+            cur = self._get_feedback_scalar(pos_name)
+            if cur is None:
+                break
+            
+            new_pos = cur + step
+            self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
+            
+            time.sleep(check_interval)
+            
+            elapsed = time.time() - start_time
+            if int(elapsed) % 2 == 0:
+                actual = self._get_feedback_scalar(pos_name)
+                print(f"进度: {elapsed:.1f}s/{run_duration}s, 位置: {actual:.6f}")
+        
+        print(f"时间到，停止运动")
+        return self._record_and_return_open_data(pos_name)
+
+    @hide_ui_while
+    def _auto_open_by_stall_detection(self, part: str, pos_name: str = "gripper_pos"):
+        """
+        方案3: 基于电机堵转/力矩异常检测自动张开
+        当检测到电机无法继续运动时停止
+        """
+        print("=== 方案3: 基于电机堵转检测自动张开 ===")
+        print("注意: 此方案需要电机反馈力矩数据支持")
+        
+        step = self.manual_control_step
+        check_interval = 0.1
+        max_duration = 30.0
+        stall_threshold = 0.00005  # 位置变化小于此值认为堵转
+        stall_count_required = 10  # 连续多次检测才确认
+        
+        print(f"步长: {step:.6f}, 堵转阈值: {stall_threshold}")
+        input("按回车开始...")
+        
+        start_time = time.time()
+        last_pos = None
+        stall_count = 0
+        
+        print("开始自动张开，检测堵转...")
+        while time.time() - start_time < max_duration:
+            cur = self._get_feedback_scalar(pos_name)
+            if cur is None:
+                break
+            
+            new_pos = cur + step
+            self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
+            
+            time.sleep(check_interval)
+            actual = self._get_feedback_scalar(pos_name)
+            
+            if actual is not None and last_pos is not None:
+                pos_change = abs(actual - last_pos)
+                if pos_change < stall_threshold:
+                    stall_count += 1
+                    print(f"疑似堵转检测: {stall_count}/{stall_count_required}, 变化: {pos_change:.6f}")
+                    if stall_count >= stall_count_required:
+                        print("检测到电机堵转，停止运动")
+                        break
+                else:
+                    stall_count = 0
+            
+            last_pos = actual
+            
+            if int((time.time() - start_time) * 10) % 20 == 0:
+                print(f"当前位置: {actual:.6f}, 堵转计数: {stall_count}")
+        
+        return self._record_and_return_open_data(pos_name)
+
+    def _record_and_return_open_data(self, pos_name: str):
+        """记录并返回张开后的数据"""
+        print("\n稳定2秒后读取数据...")
         time.sleep(2.0)
         
         final_pos = self._get_feedback_scalar(pos_name)
@@ -691,11 +797,11 @@ class MotionModule:
         
         self.g.loggerUI.info(f"自动张开完成: rad1={final_pos:.6f}, laser_open={laser_dist:.6f}")
         
-        # 保存到临时存储（用于后续计算）
-        self._calibration_temp = {
-            "rad1": final_pos,
-            "laser_open": laser_dist
-        }
+        # 保存到临时存储
+        if not hasattr(self, '_calibration_temp'):
+            self._calibration_temp = {}
+        self._calibration_temp["rad1"] = final_pos
+        self._calibration_temp["laser_open"] = laser_dist
         
         input("按回车返回菜单")
         return final_pos, laser_dist
@@ -910,140 +1016,234 @@ class MotionModule:
     @hide_ui_while
     def manual_open_by_step_to_max(self, part: str, pos_name: str = "gripper_pos"):
         """
-        方案A: 手动点按模式张开夹爪到最大位置
+        方案A: 手动点按模式张开夹爪到最大位置（非阻塞式）
         按 W 键逐步张开，按 Q 键结束并记录当前位置
+        步长固定为0.5
         """
         print("=== 方案A: 手动点按模式张开夹爪 ===")
-        print("提示: 按 W 键逐步张开夹爪，按 Q 键结束并记录rad1和laser")
-        print(f"当前步长: {self.manual_control_step:.6f}")
+        print("提示: 按 W 键逐步张开夹爪，按 S 键微调闭合，按 Q 键结束并记录rad1和laser")
+        print("步长固定为: 0.5")
+        print("按回车开始手动控制模式（按Q后自动记录数据并返回）...")
+        input()
         
-        input("按回车开始手动控制模式...")
+        # 设置标定手动控制状态
+        self._calib_manual_active = True
+        self._calib_part = part
+        self._calib_pos_name = pos_name
+        self._calib_mode = "open"  # 标记为张开模式
         
-        self.manual_control_active = True
-        self.manual_data_name = pos_name
-        self.manual_part = part
+        # 隐藏UI，进入手动控制模式
+        if hasattr(self.g, 'ui') and self.g.ui:
+            self.g.ui.show_ui = False
+            curses.endwin()
         
-        print("\n开始手动控制，按 W 张开，按 Q 结束并记录")
+        print("\n=== 开始手动控制 ===")
+        print("按 W 张开 / 按 S 微调闭合 / 按 Q 结束并记录")
+        print("（按Q后会稳定2秒自动记录数据）")
         
-        last_pos = None
-        while self.manual_control_active:
-            try:
-                ch = input("按 W 张开 / 按 Q 结束并记录: ").strip().lower()
-                
-                if ch == 'q':
-                    # 稳定2秒后记录
-                    print("稳定2秒后记录数据...")
-                    time.sleep(2.0)
-                    cur = self._get_feedback_scalar(pos_name)
-                    laser_dist = self._get_feedback_scalar("real_distance")
-                    last_pos = cur
-                    self.manual_control_active = False
-                    print(f"\n=== 手动张开完成 ===")
-                    print(f"rad1 = {cur:.6f}")
-                    print(f"laser_open = {laser_dist:.6f}")
-                    self.g.loggerUI.info(f"手动张开完成: rad1={cur:.6f}, laser_open={laser_dist:.6f}")
-                    
-                    # 保存到临时存储
-                    if not hasattr(self, '_calibration_temp'):
-                        self._calibration_temp = {}
-                    self._calibration_temp["rad1"] = cur
-                    self._calibration_temp["laser_open"] = laser_dist
-                    break
-                    
-                elif ch == 'w':
-                    # 获取当前位置并增加步长
-                    cur = self._get_feedback_scalar(pos_name)
-                    if cur is None:
-                        print("无法获取当前位置")
-                        continue
-                    new_pos = cur + self.manual_control_step
-                    
-                    # 下发位置命令
-                    self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
-                    print(f"位置: {cur:.6f} -> {new_pos:.6f}")
-                    time.sleep(0.1)  # 短暂延迟让运动执行
-                    
-                    # 读取实际位置
-                    actual = self._get_feedback_scalar(pos_name)
-                    print(f"实际位置: {actual:.6f}")
-                else:
-                    print("无效输入，请按 W 或 Q")
-                    
-            except Exception as e:
-                print(f"错误: {e}")
-                self.g.loggerUI.error(f"手动控制错误: {e}")
+        # 阻塞等待手动控制完成（通过calibration_manual_step函数在UI循环中处理）
+        while getattr(self, '_calib_manual_active', False):
+            time.sleep(0.1)
         
-        input("按回车返回菜单")
-        return last_pos
+        print("\n手动控制已结束")
 
     @hide_ui_while
     def manual_close_by_step_to_min(self, part: str, pos_name: str = "gripper_pos"):
         """
-        方案A: 手动点按模式闭合夹爪到最小位置
+        方案A: 手动点按模式闭合夹爪到最小位置（非阻塞式）
         按 S 键逐步闭合，按 Q 键结束并记录当前位置
+        步长固定为0.5
         """
         print("=== 方案A: 手动点按模式闭合夹爪 ===")
-        print("提示: 按 S 键逐步闭合夹爪，按 Q 键结束并记录rad2和laser")
-        print(f"当前步长: {self.manual_control_step:.6f}")
+        print("提示: 按 S 键逐步闭合夹爪，按 W 键微调张开，按 Q 键结束并记录rad2和laser")
+        print("步长固定为: 0.5")
+        print("按回车开始手动控制模式（按Q后自动记录数据并返回）...")
+        input()
         
-        input("按回车开始手动控制模式...")
+        # 设置标定手动控制状态
+        self._calib_manual_active = True
+        self._calib_part = part
+        self._calib_pos_name = pos_name
+        self._calib_mode = "close"  # 标记为闭合模式
         
-        self.manual_control_active = True
-        self.manual_data_name = pos_name
-        self.manual_part = part
+        # 隐藏UI，进入手动控制模式
+        if hasattr(self.g, 'ui') and self.g.ui:
+            self.g.ui.show_ui = False
+            curses.endwin()
         
-        print("\n开始手动控制，按 S 闭合，按 Q 结束并记录")
+        print("\n=== 开始手动控制 ===")
+        print("按 S 闭合 / 按 W 微调张开 / 按 Q 结束并记录")
+        print("（按Q后会稳定2秒自动记录数据）")
         
-        last_pos = None
-        while self.manual_control_active:
-            try:
-                ch = input("按 S 闭合 / 按 Q 结束并记录: ").strip().lower()
-                
-                if ch == 'q':
-                    # 稳定2秒后记录
-                    print("稳定2秒后记录数据...")
-                    time.sleep(2.0)
-                    cur = self._get_feedback_scalar(pos_name)
-                    laser_dist = self._get_feedback_scalar("real_distance")
-                    last_pos = cur
-                    self.manual_control_active = False
-                    print(f"\n=== 手动闭合完成 ===")
-                    print(f"rad2 = {cur:.6f}")
-                    print(f"laser_close = {laser_dist:.6f}")
-                    self.g.loggerUI.info(f"手动闭合完成: rad2={cur:.6f}, laser_close={laser_dist:.6f}")
-                    
-                    # 保存到临时存储
-                    if not hasattr(self, '_calibration_temp'):
-                        self._calibration_temp = {}
-                    self._calibration_temp["rad2"] = cur
-                    self._calibration_temp["laser_close"] = laser_dist
-                    break
-                    
-                elif ch == 's':
-                    # 获取当前位置并减小步长（闭合）
-                    cur = self._get_feedback_scalar(pos_name)
-                    if cur is None:
-                        print("无法获取当前位置")
-                        continue
-                    new_pos = cur - self.manual_control_step  # 闭合是减小位置
-                    
-                    # 下发位置命令
-                    self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
-                    print(f"位置: {cur:.6f} -> {new_pos:.6f}")
-                    time.sleep(0.1)  # 短暂延迟让运动执行
-                    
-                    # 读取实际位置
-                    actual = self._get_feedback_scalar(pos_name)
-                    print(f"实际位置: {actual:.6f}")
-                else:
-                    print("无效输入，请按 S 或 Q")
-                    
-            except Exception as e:
-                print(f"错误: {e}")
-                self.g.loggerUI.error(f"手动控制错误: {e}")
+        # 阻塞等待手动控制完成（通过calibration_manual_step函数在UI循环中处理）
+        while getattr(self, '_calib_manual_active', False):
+            time.sleep(0.1)
         
-        input("按回车返回菜单")
-        return last_pos
+        print("\n手动控制已结束")
+
+    def calibration_manual_open_step(self):
+        """标定专用的手动张开步进函数，在UI循环中调用"""
+        if not getattr(self, '_calib_manual_active', False):
+            return
+        
+        step = 0.5  # 固定步长为0.5
+        part = self._calib_part
+        pos_name = self._calib_pos_name
+        
+        key = None
+        try:
+            ch = self.g.ui.win_menu.getch()
+            if ch != -1:
+                key = chr(ch).lower()
+        except:
+            return
+        
+        if key is None:
+            return
+        
+        if key == 'q':
+            # 退出并记录
+            print("\n稳定2秒后记录数据...")
+            time.sleep(2.0)
+            cur = self._get_feedback_scalar(pos_name)
+            laser_dist = self._get_feedback_scalar("real_distance")
+            
+            self._calib_manual_active = False
+            print(f"\n=== 手动张开完成 ===")
+            print(f"rad1 = {cur:.6f}")
+            print(f"laser_open = {laser_dist:.6f}")
+            self.g.loggerUI.info(f"手动张开完成: rad1={cur:.6f}, laser_open={laser_dist:.6f}")
+            
+            # 保存到临时存储
+            if not hasattr(self, '_calibration_temp'):
+                self._calibration_temp = {}
+            self._calibration_temp["rad1"] = cur
+            self._calibration_temp["laser_open"] = laser_dist
+            
+            # 恢复UI显示
+            if hasattr(self.g, 'ui') and self.g.ui:
+                self.g.ui.show_ui = True
+                curses.initscr()
+                curses.curs_set(0)
+                H, W = curses.initscr().getmaxyx()
+                log_h = H - self.g.ui.feedback_h - self.g.ui.menu_h - self.g.ui.hblog_h
+                self.g.ui.win_feedback = curses.newwin(self.g.ui.feedback_h, W, 0, 0)
+                self.g.ui.win_menu = curses.newwin(self.g.ui.menu_h, W, self.g.ui.feedback_h, 0)
+                self.g.ui.win_menu.nodelay(True)
+                self.g.ui.win_menu.keypad(True)
+                self.g.ui.win_log = curses.newwin(log_h, W, self.g.ui.feedback_h + self.g.ui.menu_h, 0)
+                self.g.ui.win_hblog = curses.newwin(self.g.ui.hblog_h, W, self.g.ui.feedback_h + self.g.ui.menu_h + log_h, 0)
+                self.g.ui._draw_feedback()
+                self.g.ui._draw_menu()
+                self.g.ui._draw_log()
+                self.g.ui._draw_hblog()
+                curses.doupdate()
+            
+            input("按回车返回菜单")
+            return
+            
+        elif key == 'w':
+            # 获取当前位置并增加步长
+            cur = self._get_feedback_scalar(pos_name)
+            if cur is None:
+                return
+            new_pos = cur + step
+            
+            # 下发位置命令
+            self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
+            print(f"位置: {cur:.6f} -> {new_pos:.6f}")
+        elif key == 's':
+            # 获取当前位置并减小步长（可以微调）
+            cur = self._get_feedback_scalar(pos_name)
+            if cur is None:
+                return
+            new_pos = cur - step
+            
+            # 下发位置命令
+            self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
+            print(f"位置: {cur:.6f} -> {new_pos:.6f}")
+
+    def calibration_manual_close_step(self):
+        """标定专用的手动闭合步进函数，在UI循环中调用"""
+        if not getattr(self, '_calib_manual_active', False):
+            return
+        
+        step = 0.5  # 固定步长为0.5
+        part = self._calib_part
+        pos_name = self._calib_pos_name
+        
+        key = None
+        try:
+            ch = self.g.ui.win_menu.getch()
+            if ch != -1:
+                key = chr(ch).lower()
+        except:
+            return
+        
+        if key is None:
+            return
+        
+        if key == 'q':
+            # 退出并记录
+            print("\n稳定2秒后记录数据...")
+            time.sleep(2.0)
+            cur = self._get_feedback_scalar(pos_name)
+            laser_dist = self._get_feedback_scalar("real_distance")
+            
+            self._calib_manual_active = False
+            print(f"\n=== 手动闭合完成 ===")
+            print(f"rad2 = {cur:.6f}")
+            print(f"laser_close = {laser_dist:.6f}")
+            self.g.loggerUI.info(f"手动闭合完成: rad2={cur:.6f}, laser_close={laser_dist:.6f}")
+            
+            # 保存到临时存储
+            if not hasattr(self, '_calibration_temp'):
+                self._calibration_temp = {}
+            self._calibration_temp["rad2"] = cur
+            self._calibration_temp["laser_close"] = laser_dist
+            
+            # 恢复UI显示
+            if hasattr(self.g, 'ui') and self.g.ui:
+                self.g.ui.show_ui = True
+                curses.initscr()
+                curses.curs_set(0)
+                H, W = curses.initscr().getmaxyx()
+                log_h = H - self.g.ui.feedback_h - self.g.ui.menu_h - self.g.ui.hblog_h
+                self.g.ui.win_feedback = curses.newwin(self.g.ui.feedback_h, W, 0, 0)
+                self.g.ui.win_menu = curses.newwin(self.g.ui.menu_h, W, self.g.ui.feedback_h, 0)
+                self.g.ui.win_menu.nodelay(True)
+                self.g.ui.win_menu.keypad(True)
+                self.g.ui.win_log = curses.newwin(log_h, W, self.g.ui.feedback_h + self.g.ui.menu_h, 0)
+                self.g.ui.win_hblog = curses.newwin(self.g.ui.hblog_h, W, self.g.ui.feedback_h + self.g.ui.menu_h + log_h, 0)
+                self.g.ui._draw_feedback()
+                self.g.ui._draw_menu()
+                self.g.ui._draw_log()
+                self.g.ui._draw_hblog()
+                curses.doupdate()
+            
+            input("按回车返回菜单")
+            return
+            
+        elif key == 's':
+            # 获取当前位置并减小步长（闭合）
+            cur = self._get_feedback_scalar(pos_name)
+            if cur is None:
+                return
+            new_pos = cur - step
+            
+            # 下发位置命令
+            self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
+            print(f"位置: {cur:.6f} -> {new_pos:.6f}")
+        elif key == 'w':
+            # 获取当前位置并增加步长（可以微调）
+            cur = self._get_feedback_scalar(pos_name)
+            if cur is None:
+                return
+            new_pos = cur + step
+            
+            # 下发位置命令
+            self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
+            print(f"位置: {cur:.6f} -> {new_pos:.6f}")
 
     @hide_ui_while
     def repeatability_position_accuracy_test(self, part: str, pos_name: str):
