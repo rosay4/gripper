@@ -1,4 +1,4 @@
-﻿from prelude import *
+from prelude import *
 from enum import Enum, auto
 import serial
 import serial.tools.list_ports
@@ -542,6 +542,13 @@ class GripperGuide(BaseGuide):
             "5": {
                 "description": "set: point mode step",
                 "callback": self.motion.set_manual_control_step,
+            },
+            "6": {
+                "description": "reset: 重置yaml参数为默认值并加载",
+                "callback": lambda: self.motion.manual_calibration_reset_yaml_and_reload(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
             },
         }
         self.push_menu(menu, "夹爪参数自动矫正")
