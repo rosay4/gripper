@@ -244,14 +244,6 @@ class CursesUI:
                 self._draw_hblog()
                 curses.doupdate()
                 self.guide.motion.manual_control_1dof_step()
-                
-                # 标定专用的手动控制步进函数
-                if hasattr(self.guide.motion, '_calib_manual_active') and self.guide.motion._calib_manual_active:
-                    mode = getattr(self.guide.motion, '_calib_mode', 'open')
-                    if mode == 'open':
-                        self.guide.motion.calibration_manual_open_step()
-                    elif mode == 'close':
-                        self.guide.motion.calibration_manual_close_step()
 
             self._handle_input()
             time.sleep(0.1)
