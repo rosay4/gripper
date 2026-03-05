@@ -602,6 +602,7 @@ class MotionModule:
                                   pos_threshold: float = 0.00001, stable_target: int = 15) -> float:
         """
         通过位置爬坡模拟匀速运动进行标定（堵转检测）
+        在接近极限位置时自动减小步长以提高精度
         
         Args:
             part: 夹爪部件名
@@ -616,11 +617,13 @@ class MotionModule:
             最终位置值
         """
         dt = 1.0 / ctrl_freq
-        step = target_speed * dt
+        base_step = target_speed * dt
+        current_step = base_step
         
         direction_str = "闭合" if direction_sign == -1 else "张开"
         print(f"\n>>> 开始标定{direction_str}位置 (速度: {target_speed}, 方向: {direction_sign})")
-        print(f"    控制频率: {ctrl_freq}Hz, 步长: {step:.6f}, 堵转阈值: {pos_threshold}")
+        print(f"    控制频率: {ctrl_freq}Hz, 基础步长: {base_step:.6f}, 堵转阈值: {pos_threshold}")
+        print(f"    特性: 接近极限位置时自动减小步长以提高精度")
         
         # 获取起始位置
         start_pos = self._get_feedback_scalar(pos_name)
@@ -630,16 +633,50 @@ class MotionModule:
         last_actual_pos = start_pos
         stable_count = 0
         
+        # 激光距离阈值（用于调整步长）
+        LASER_THRESHOLD_OPEN = 0.095   # 张开时激光距离小于95mm时减速
+        LASER_THRESHOLD_CLOSE = 0.005  # 闭合时激光距离小于5mm时减速
+        STEP_REDUCTION_FACTOR = 0.3    # 减速因子
+        
         print(f"    起始位置: {start_pos:.6f}")
         print("    开始位置爬坡... (按Ctrl+C可中断)")
         
         last_print_time = time.time()
         start_time = time.time()
+        slowdown_active = False
         
         try:
             while True:
+                # 获取激光测距仪数据（用于调整步长）
+                real_distance = self._get_feedback_scalar("real_distance")
+                
+                # 根据激光距离调整步长
+                if real_distance is not None:
+                    if direction_sign == 1:  # 张开
+                        if real_distance < LASER_THRESHOLD_OPEN:
+                            if not slowdown_active:
+                                current_step = base_step * STEP_REDUCTION_FACTOR
+                                slowdown_active = True
+                                print(f"    ↓ 接近极限，步长减小至 {current_step:.6f} (激光: {real_distance:.4f}m)")
+                        else:
+                            if slowdown_active:
+                                current_step = base_step
+                                slowdown_active = False
+                                print(f"    ↑ 恢复正常步长 {current_step:.6f}")
+                    else:  # 闭合
+                        if real_distance < LASER_THRESHOLD_CLOSE:
+                            if not slowdown_active:
+                                current_step = base_step * STEP_REDUCTION_FACTOR
+                                slowdown_active = True
+                                print(f"    ↓ 接近极限，步长减小至 {current_step:.6f} (激光: {real_distance:.4f}m)")
+                        else:
+                            if slowdown_active:
+                                current_step = base_step
+                                slowdown_active = False
+                                print(f"    ↑ 恢复正常步长 {current_step:.6f}")
+                
                 # 1. 更新指令位置
-                command_pos += step * direction_sign
+                command_pos += current_step * direction_sign
                 
                 # 2. 发送位置指令
                 self.g.robot.set_actions({part: {"type": "position", "position": [command_pos]}})
@@ -652,25 +689,23 @@ class MotionModule:
                 if current_actual_pos is None:
                     current_actual_pos = last_actual_pos
                 
-                # 5. 获取激光测距仪数据
-                real_distance = self._get_feedback_scalar("real_distance")
-                
-                # 6. 堵转检测
+                # 5. 堵转检测
                 if abs(current_actual_pos - last_actual_pos) < pos_threshold:
                     stable_count += 1
                 else:
                     stable_count = 0
                 
-                # 7. 实时显示（每0.5秒）
+                # 6. 实时显示（每0.5秒）
                 current_time = time.time()
                 if current_time - last_print_time >= 0.5:
                     elapsed = current_time - start_time
                     laser_str = f", 激光: {real_distance:.4f}" if real_distance is not None else ""
+                    step_str = f", 步长: {current_step:.6f}" if slowdown_active else ""
                     print(f"    [{elapsed:5.1f}s] 位置: {current_actual_pos:8.6f}, "
-                          f"指令: {command_pos:8.6f}, 稳定计数: {stable_count:2d}/{stable_target}{laser_str}")
+                          f"指令: {command_pos:8.6f}, 稳定计数: {stable_count:2d}/{stable_target}{laser_str}{step_str}")
                     last_print_time = current_time
                 
-                # 8. 检测到堵转
+                # 7. 检测到堵转
                 if stable_count >= stable_target:
                     # 停止更新，保持在当前位置
                     self.g.robot.set_actions({part: {"type": "position", "position": [current_actual_pos]}})
@@ -1204,7 +1239,11 @@ class MotionModule:
                 current_time = time.time()
                 if current_time - last_print_time >= 1.0:
                     elapsed = current_time - start_time
-                    print(f"[{elapsed:.1f}s] 当前位置: {actual:.6f}, 变化量: {max(positions_history)-min(positions_history):.6f if positions_history else 0:.6f}")
+                    if positions_history:
+                        variation = max(positions_history) - min(positions_history)
+                    else:
+                        variation = 0.0
+                    print(f"[{elapsed:.1f}s] 当前位置: {actual:.6f}, 变化量: {variation:.6f}")
                     last_print_time = current_time
         
         elapsed = time.time() - start_time
