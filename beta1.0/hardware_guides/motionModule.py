@@ -825,7 +825,10 @@ class MotionModule:
             input("按回车返回")
             return
         
-        print(f"\n    闭合位置记录: min_pos = {min_pos:.6f}")
+        # 读取闭合位置的激光数据
+        time.sleep(0.5)
+        laser_close = self._get_feedback_scalar("real_distance")
+        print(f"    闭合位置记录: min_pos = {min_pos:.6f}, laser_close = {laser_close:.6f if laser_close else 'N/A'}")
         time.sleep(1.0)
         
         # ========== 步骤2: 寻找正向极限（全开） ==========
@@ -845,7 +848,10 @@ class MotionModule:
             input("按回车返回")
             return
         
-        print(f"\n    张开位置记录: max_pos = {max_pos:.6f}")
+        # 读取张开位置的激光数据
+        time.sleep(0.5)
+        laser_open = self._get_feedback_scalar("real_distance")
+        print(f"    张开位置记录: max_pos = {max_pos:.6f}, laser_open = {laser_open:.6f if laser_open else 'N/A'}")
         
         # ========== 步骤3: 计算并输出 ==========
         print("\n" + "=" * 60)
@@ -858,49 +864,47 @@ class MotionModule:
         print(f"    │  闭合位置 (min): {min_pos:12.6f}     │")
         print(f"    │  张开位置 (max): {max_pos:12.6f}     │")
         print(f"    │  弧度行程 (rad): {stroke_rad:11.6f}     │")
+        print(f"    │  激光闭合 (m):   {laser_close:12.6f}     │" if laser_close else "    │  激光闭合 (m):   N/A                 │")
+        print(f"    │  激光张开 (m):   {laser_open:12.6f}     │" if laser_open else "    │  激光张开 (m):   N/A                 │")
         print(f"    └─────────────────────────────────────┘")
         
         self.g.loggerUI.info(f"[标定完成] {part}: min={min_pos:.6f}, max={max_pos:.6f}, stroke_rad={stroke_rad:.6f}")
         
-        # ========== 步骤4: 输入激光测距数据并计算 length_per_radian ==========
+        # ========== 步骤4: 自动计算 length_per_radian ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤4: 计算实际的 length_per_radian")
+        print(">>> 步骤4: 自动计算 length_per_radian")
         print("=" * 60)
         
-        print("\n请使用激光测距仪测量夹爪的实际行程距离（单位：米）")
-        print("测量方法：测量夹爪从完全闭合到完全张开的实际位移")
+        # 检查激光数据
+        if laser_close is None or laser_open is None:
+            print("\n错误: 无法读取激光测距仪数据")
+            print("请确保激光测距仪已连接并发布 real_distance 数据")
+            input("按回车返回")
+            return
         
-        try:
-            real_distance_input = input("\n请输入实际行程距离 (单位: 米, 例如 0.025): ").strip()
-            real_distance = float(real_distance_input)
-            
-            if real_distance <= 0:
-                print("错误: 行程距离必须大于0")
-                input("按回车返回")
-                return
-            
-            if stroke_rad < 1e-9:
-                print(f"错误: 弧度变化过小 ({stroke_rad:.10f})")
-                input("按回车返回")
-                return
-            
-            # 计算 length_per_radian
-            length_per_radian = real_distance / (2000.0 * stroke_rad)
-            length_per_radian_10 = round(length_per_radian, 10)
-            
-            print(f"\n计算结果:")
-            print(f"  实际行程: {real_distance:.6f} m")
-            print(f"  弧度变化: {stroke_rad:.6f} rad")
-            print(f"  length_per_radian = {length_per_radian_10:.10f}")
-            
-        except ValueError:
-            print("错误: 请输入有效的数字")
+        # 计算实际行程
+        real_distance = abs(laser_open - laser_close)
+        
+        if real_distance <= 0:
+            print(f"\n错误: 激光行程距离无效 ({real_distance:.6f})")
             input("按回车返回")
             return
-        except Exception as e:
-            print(f"计算失败: {e}")
+        
+        if stroke_rad < 1e-9:
+            print(f"\n错误: 弧度变化过小 ({stroke_rad:.10f})")
             input("按回车返回")
             return
+        
+        # 计算 length_per_radian
+        length_per_radian = real_distance / (2000.0 * stroke_rad)
+        length_per_radian_10 = round(length_per_radian, 10)
+        
+        print(f"\n自动计算结果:")
+        print(f"  激光闭合位置: {laser_close:.6f} m")
+        print(f"  激光张开位置: {laser_open:.6f} m")
+        print(f"  实际行程: {real_distance:.6f} m")
+        print(f"  弧度变化: {stroke_rad:.6f} rad")
+        print(f"  length_per_radian = {length_per_radian_10:.10f}")
         
         # ========== 步骤5: 写入 length_per_radian 并同步 ==========
         print("\n" + "=" * 60)
