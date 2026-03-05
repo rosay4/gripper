@@ -551,6 +551,10 @@ class MotionModule:
 
         input("Press Enter to return")
 
+    def _get_gripper_yaml_path(self, part: str) -> str:
+        """获取夹爪yaml文件路径"""
+        return f"/opt/robot/rb_hardware/{part}.yaml"
+
     @hide_ui_while
     def sync_yaml_params_to_ui(self, part: str, pos_name: str = "gripper_pos"):
         """同步当前yaml文件的参数到UI（重新加载yaml并下发到电机）"""
