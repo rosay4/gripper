@@ -735,27 +735,32 @@ class MotionModule:
     @hide_ui_while
     def full_auto_calibration(self, part: str, pos_name: str = "gripper_pos"):
         """
-        【参考已有完整流程】自动标定并设零（完整版）
+        【参考已有完整流程】自动标定并设零（分阶段版）
         
-        完整流程：
+        阶段1 - 标定并计算参数（步骤0-4）：
         1. 自动重置yaml参数为 length_per_radian=1.0, offset_at_hardware_zero=0.0
-        2. 寻找负向极限（闭合）→ 记录 rad_min
-        3. 寻找正向极限（全开）→ 记录 rad_max
-        4. 输入激光测距仪的实际行程距离
-        5. 计算实际的 length_per_radian 并写入yaml
-        6. 同步yaml参数到UI
-        7. 移动到闭合位置（min_pos）并设零
-        8. 移动到 0.025 位置
-        9. 再次设零
-        10. 设置 offset_at_hardware_zero = 0.025
+        2. 寻找正向极限（全开）→ 停2秒 → 读取 laser_open
+        3. 寻找负向极限（闭合）→ 停2秒 → 读取 laser_close
+        4. 计算 length_per_radian 并写入yaml，同步到UI，保存状态后退出
+        
+        阶段2 - 完成设零（步骤5-8，重新进入后执行）：
+        5. 在闭合位置设零
+        6. 移动到 0.025 位置
+        7. 再次设零
+        8. 设置 offset_at_hardware_zero = 0.025
         """
+        # 检查是否有保存的状态（阶段2）
+        if hasattr(self, '_calibration_state') and self._calibration_state.get('part') == part:
+            return self._full_auto_calibration_phase2(part, pos_name)
+        
+        # ========== 阶段1: 标定并计算参数 ==========
         print("=" * 60)
-        print("【参考已有完整流程】自动标定并设零（完整版）")
+        print("【参考已有完整流程】自动标定并设零（阶段1: 标定并计算参数）")
         print("=" * 60)
         print(f"夹爪: {part}")
         print()
         
-        # ========== 步骤0: 重置参数 ==========
+        # 步骤0: 重置参数
         print(">>> 步骤0: 重置yaml参数为默认值")
         try:
             yaml_path = self._write_gripper_yaml_params(
@@ -808,33 +813,9 @@ class MotionModule:
         except Exception as e:
             print(f"    ! 取消限位失败（可能不影响）: {e}")
         
-        # ========== 步骤1: 寻找负向极限（闭合） ==========
+        # ========== 步骤1: 寻找正向极限（全开） ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤1: 寻找负向极限（闭合）")
-        print("=" * 60)
-        
-        try:
-            min_pos = self._calibrate_gripper_climb(part, pos_name, direction_sign=-1)
-        except KeyboardInterrupt:
-            print("\n标定被用户中断")
-            input("按回车返回")
-            return
-        except Exception as e:
-            print(f"\n标定失败: {e}")
-            self.g.loggerUI.error(f"闭合标定失败: {e}")
-            input("按回车返回")
-            return
-        
-        # 读取闭合位置的激光数据
-        time.sleep(0.5)
-        laser_close = self._get_feedback_scalar("real_distance")
-        laser_close_str = f"{laser_close:.6f}" if laser_close is not None else "N/A"
-        print(f"    闭合位置记录: min_pos = {min_pos:.6f}, laser_close = {laser_close_str}")
-        time.sleep(1.0)
-        
-        # ========== 步骤2: 寻找正向极限（全开） ==========
-        print("\n" + "=" * 60)
-        print(">>> 步骤2: 寻找正向极限（全开）")
+        print(">>> 步骤1: 寻找正向极限（全开）")
         print("=" * 60)
         
         try:
@@ -849,122 +830,181 @@ class MotionModule:
             input("按回车返回")
             return
         
-        # 读取张开位置的激光数据
-        time.sleep(0.5)
-        laser_open = self._get_feedback_scalar("real_distance")
-        laser_open_str = f"{laser_open:.6f}" if laser_open is not None else "N/A"
-        print(f"    张开位置记录: max_pos = {max_pos:.6f}, laser_open = {laser_open_str}")
+        print(f"\n    张开位置记录: max_pos = {max_pos:.6f}")
         
-        # ========== 步骤3: 计算并输出 ==========
+        # 停2秒，读取激光数据
+        print("    稳定2秒后读取激光数据...")
+        time.sleep(2.0)
+        laser_open = self._get_feedback_scalar("real_distance")
+        print(f"    激光测距（张开）: laser_open = {laser_open:.6f} m")
+        
+        # ========== 步骤2: 寻找负向极限（闭合） ==========
+        print("\n" + "=" * 60)
+        print(">>> 步骤2: 寻找负向极限（闭合）")
+        print("=" * 60)
+        
+        try:
+            min_pos = self._calibrate_gripper_climb(part, pos_name, direction_sign=-1)
+        except KeyboardInterrupt:
+            print("\n标定被用户中断")
+            input("按回车返回")
+            return
+        except Exception as e:
+            print(f"\n标定失败: {e}")
+            self.g.loggerUI.error(f"闭合标定失败: {e}")
+            input("按回车返回")
+            return
+        
+        print(f"\n    闭合位置记录: min_pos = {min_pos:.6f}")
+        
+        # 停2秒，读取激光数据
+        print("    稳定2秒后读取激光数据...")
+        time.sleep(2.0)
+        laser_close = self._get_feedback_scalar("real_distance")
+        print(f"    激光测距（闭合）: laser_close = {laser_close:.6f} m")
+        
+        # ========== 步骤3: 显示标定报告 ==========
         print("\n" + "=" * 60)
         print(">>> 步骤3: 标定报告")
         print("=" * 60)
         
         stroke_rad = abs(max_pos - min_pos)
-        laser_close_display = f"{laser_close:12.6f}" if laser_close is not None else "         N/A"
-        laser_open_display = f"{laser_open:12.6f}" if laser_open is not None else "         N/A"
+        real_distance = laser_open - laser_close if laser_open and laser_close else 0.0
+        
         print(f"\n    标定结果:")
         print(f"    ┌─────────────────────────────────────┐")
-        print(f"    │  闭合位置 (min): {min_pos:12.6f}     │")
         print(f"    │  张开位置 (max): {max_pos:12.6f}     │")
+        print(f"    │  激光张开:       {laser_open:12.6f} m   │") if laser_open else print(f"    │  激光张开:       未读取               │")
+        print(f"    │  闭合位置 (min): {min_pos:12.6f}     │")
+        print(f"    │  激光闭合:       {laser_close:12.6f} m   │") if laser_close else print(f"    │  激光闭合:       未读取               │")
         print(f"    │  弧度行程 (rad): {stroke_rad:11.6f}     │")
-        print(f"    │  激光闭合 (m):   {laser_close_display}     │")
-        print(f"    │  激光张开 (m):   {laser_open_display}     │")
+        print(f"    │  实际行程 (m):   {real_distance:11.6f}     │") if real_distance else print(f"    │  实际行程 (m):   未计算               │")
         print(f"    └─────────────────────────────────────┘")
         
-        self.g.loggerUI.info(f"[标定完成] {part}: min={min_pos:.6f}, max={max_pos:.6f}, stroke_rad={stroke_rad:.6f}")
+        self.g.loggerUI.info(f"[标定完成] {part}: max={max_pos:.6f}, min={min_pos:.6f}, stroke_rad={stroke_rad:.6f}")
         
-        # ========== 步骤4: 自动计算 length_per_radian ==========
-        print("\n" + "=" * 60)
-        print(">>> 步骤4: 自动计算 length_per_radian")
-        print("=" * 60)
-        
-        # 检查激光数据
-        if laser_close is None or laser_open is None:
-            print("\n错误: 无法读取激光测距仪数据")
-            print("请确保激光测距仪已连接并发布 real_distance 数据")
+        # 检查激光数据有效性
+        if laser_open is None or laser_close is None:
+            print("\n    ✗ 错误: 未能读取激光测距数据")
             input("按回车返回")
             return
         
-        # 计算实际行程
-        real_distance = abs(laser_open - laser_close)
-        
         if real_distance <= 0:
-            print(f"\n错误: 激光行程距离无效 ({real_distance:.6f})")
+            print(f"\n    ✗ 错误: 实际行程距离无效 ({real_distance:.6f})")
             input("按回车返回")
             return
         
         if stroke_rad < 1e-9:
-            print(f"\n错误: 弧度变化过小 ({stroke_rad:.10f})")
+            print(f"\n    ✗ 错误: 弧度变化过小 ({stroke_rad:.10f})")
             input("按回车返回")
             return
         
-        # 计算 length_per_radian
-        length_per_radian = real_distance / (2000.0 * stroke_rad)
-        length_per_radian_10 = round(length_per_radian, 10)
-        
-        print(f"\n自动计算结果:")
-        print(f"  激光闭合位置: {laser_close:.6f} m")
-        print(f"  激光张开位置: {laser_open:.6f} m")
-        print(f"  实际行程: {real_distance:.6f} m")
-        print(f"  弧度变化: {stroke_rad:.6f} rad")
-        print(f"  length_per_radian = {length_per_radian_10:.10f}")
-        
-        # ========== 步骤5: 写入 length_per_radian 并同步 ==========
+        # ========== 步骤4: 计算并写入参数 ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤5: 写入参数并同步到UI")
+        print(">>> 步骤4: 计算并写入 length_per_radian")
         print("=" * 60)
         
         try:
+            # 计算 length_per_radian
+            length_per_radian = real_distance / (2000.0 * stroke_rad)
+            length_per_radian_10 = round(length_per_radian, 10)
+            
+            print(f"\n计算结果:")
+            print(f"  实际行程: {real_distance:.6f} m")
+            print(f"  弧度变化: {stroke_rad:.6f} rad")
+            print(f"  length_per_radian = {length_per_radian_10:.10f}")
+            
             # 写入yaml
             yaml_path = self._write_gripper_yaml_params(
                 part=part,
                 length_per_radian=length_per_radian_10,
             )
-            print(f"    ✓ length_per_radian 已写入: {length_per_radian_10:.10f}")
+            print(f"\n    ✓ length_per_radian 已写入: {length_per_radian_10:.10f}")
             print(f"      文件: {yaml_path}")
             
-            # 同步到UI（重新加载）
+            # 同步到UI
             if hasattr(self.g, "reload_robot_from_yaml"):
                 self.g.reload_robot_from_yaml()
                 print(f"    ✓ 参数已同步到UI")
             else:
                 print(f"    ! reload_robot_from_yaml() 未找到，请手动重启")
-                
+            
             self.g.loggerUI.info(f"[参数更新] {part}: length_per_radian={length_per_radian_10:.10f}")
             
         except Exception as e:
-            print(f"    ✗ 写入或同步失败: {e}")
-            self.g.loggerUI.error(f"写入或同步失败: {e}")
+            print(f"\n    ✗ 计算或写入失败: {e}")
+            self.g.loggerUI.error(f"计算或写入失败: {e}")
             input("按回车返回")
             return
         
-        # ========== 步骤6: 移动到闭合位置并设零 ==========
+        # 保存状态，等待阶段2
+        self._calibration_state = {
+            'part': part,
+            'min_pos': min_pos,
+            'max_pos': max_pos,
+            'laser_open': laser_open,
+            'laser_close': laser_close,
+            'length_per_radian': length_per_radian_10,
+        }
+        
+        # ========== 阶段1完成 ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤6: 移动到闭合位置并设零")
+        print("【阶段1完成】参数已计算并写入")
+        print("=" * 60)
+        print(f"\n    已保存的标定数据:")
+        print(f"      length_per_radian = {length_per_radian_10:.10f}")
+        print(f"      min_pos = {min_pos:.6f}")
+        print(f"      max_pos = {max_pos:.6f}")
+        print(f"\n    ⚠️  请返回主界面确认参数是否正确")
+        print(f"    确认无误后，重新进入本菜单继续阶段2（设零流程）")
+        
+        input("\n按回车返回主界面")
+
+
+    def _full_auto_calibration_phase2(self, part: str, pos_name: str = "gripper_pos"):
+        """
+        阶段2: 完成设零流程
+        """
+        state = self._calibration_state
+        min_pos = state['min_pos']
+        length_per_radian_10 = state['length_per_radian']
+        
+        print("=" * 60)
+        print("【参考已有完整流程】自动标定并设零（阶段2: 完成设零）")
+        print("=" * 60)
+        print(f"夹爪: {part}")
+        print(f"\n    恢复的标定数据:")
+        print(f"      length_per_radian = {length_per_radian_10:.10f}")
+        print(f"      min_pos = {min_pos:.6f}")
+        
+        # 确认继续
+        confirm = input("\n是否继续完成设零流程? (y/n): ").strip().lower()
+        if confirm != 'y':
+            print("已取消")
+            input("按回车返回")
+            return
+        
+        # ========== 步骤5: 在闭合位置设零 ==========
+        print("\n" + "=" * 60)
+        print(">>> 步骤5: 在闭合位置设零")
         print("=" * 60)
         
-        print(f"\n    目标位置: 闭合位置 ({min_pos:.6f})")
+        print(f"\n    当前位置应该是闭合位置 ({min_pos:.6f})")
+        print(f"    执行硬件设零...")
         
         try:
-            self._smooth_move_to(part, pos_name, min_pos, duration=2.0)
-            time.sleep(0.5)
-            
-            print(f"\n    执行硬件设零（闭合位置）...")
             self.set_zero(part=part)
             print(f"    ✓ 设零完成！")
-            
             self.g.loggerUI.info(f"[设零完成] {part} 在闭合位置设零")
-            
         except Exception as e:
-            print(f"    ✗ 移动或设零失败: {e}")
-            self.g.loggerUI.error(f"移动或设零失败: {e}")
+            print(f"    ✗ 设零失败: {e}")
+            self.g.loggerUI.error(f"设零失败: {e}")
             input("按回车返回")
             return
         
-        # ========== 步骤7: 移动到 0.025 位置 ==========
+        # ========== 步骤6: 移动到 0.025 位置 ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤7: 移动到 0.025 位置")
+        print(">>> 步骤6: 移动到 0.025 位置")
         print("=" * 60)
         
         target_pos = 0.025
@@ -974,34 +1014,31 @@ class MotionModule:
             self._smooth_move_to(part, pos_name, target_pos, duration=2.0)
             time.sleep(0.5)
             print(f"    ✓ 已到达 0.025 位置")
-            
         except Exception as e:
             print(f"    ✗ 移动失败: {e}")
             self.g.loggerUI.error(f"移动失败: {e}")
             input("按回车返回")
             return
         
-        # ========== 步骤8: 再次设零 ==========
+        # ========== 步骤7: 再次设零 ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤8: 再次设零（在 0.025 位置）")
+        print(">>> 步骤7: 再次设零（在 0.025 位置）")
         print("=" * 60)
         
         try:
             print(f"\n    执行硬件设零...")
             self.set_zero(part=part)
             print(f"    ✓ 设零完成！")
-            
             self.g.loggerUI.info(f"[设零完成] {part} 在 0.025 位置设零")
-            
         except Exception as e:
             print(f"    ✗ 设零失败: {e}")
             self.g.loggerUI.error(f"设零失败: {e}")
             input("按回车返回")
             return
         
-        # ========== 步骤9: 设置 offset_at_hardware_zero = 0.025 ==========
+        # ========== 步骤8: 设置 offset_at_hardware_zero = 0.025 ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤9: 设置 offset_at_hardware_zero = 0.025")
+        print(">>> 步骤8: 设置 offset_at_hardware_zero = 0.025")
         print("=" * 60)
         
         try:
@@ -1018,25 +1055,23 @@ class MotionModule:
                 print(f"    ✓ 参数已同步到UI")
             else:
                 print(f"    ! reload_robot_from_yaml() 未找到，请手动重启")
-                
-            self.g.loggerUI.info(f"[参数更新] {part}: offset_at_hardware_zero=0.025")
             
+            self.g.loggerUI.info(f"[参数更新] {part}: offset_at_hardware_zero=0.025")
         except Exception as e:
             print(f"    ✗ 写入或同步失败: {e}")
             self.g.loggerUI.error(f"写入或同步失败: {e}")
         
+        # 清除状态
+        delattr(self, '_calibration_state')
+        
         # ========== 完成 ==========
         print("\n" + "=" * 60)
-        print("【参考已有完整流程】自动标定并设零 - 完成")
+        print("【参考已有完整流程】自动标定并设零 - 全部完成")
         print("=" * 60)
         print(f"\n    最终参数:")
         print(f"      length_per_radian = {length_per_radian_10:.10f}")
         print(f"      offset_at_hardware_zero = 0.025")
         print(f"      零点位置 = 0.025 位置（从闭合位置张开）")
-        print(f"\n    标定数据:")
-        print(f"      闭合位置: {min_pos:.6f}")
-        print(f"      张开位置: {max_pos:.6f}")
-        print(f"      实际行程: {real_distance:.6f} m")
         
         input("\n按回车返回")
 
