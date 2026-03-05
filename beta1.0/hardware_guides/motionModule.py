@@ -828,7 +828,8 @@ class MotionModule:
         # 读取闭合位置的激光数据
         time.sleep(0.5)
         laser_close = self._get_feedback_scalar("real_distance")
-        print(f"    闭合位置记录: min_pos = {min_pos:.6f}, laser_close = {laser_close:.6f if laser_close else 'N/A'}")
+        laser_close_str = f"{laser_close:.6f}" if laser_close is not None else "N/A"
+        print(f"    闭合位置记录: min_pos = {min_pos:.6f}, laser_close = {laser_close_str}")
         time.sleep(1.0)
         
         # ========== 步骤2: 寻找正向极限（全开） ==========
@@ -851,7 +852,8 @@ class MotionModule:
         # 读取张开位置的激光数据
         time.sleep(0.5)
         laser_open = self._get_feedback_scalar("real_distance")
-        print(f"    张开位置记录: max_pos = {max_pos:.6f}, laser_open = {laser_open:.6f if laser_open else 'N/A'}")
+        laser_open_str = f"{laser_open:.6f}" if laser_open is not None else "N/A"
+        print(f"    张开位置记录: max_pos = {max_pos:.6f}, laser_open = {laser_open_str}")
         
         # ========== 步骤3: 计算并输出 ==========
         print("\n" + "=" * 60)
@@ -859,13 +861,15 @@ class MotionModule:
         print("=" * 60)
         
         stroke_rad = abs(max_pos - min_pos)
+        laser_close_display = f"{laser_close:12.6f}" if laser_close is not None else "         N/A"
+        laser_open_display = f"{laser_open:12.6f}" if laser_open is not None else "         N/A"
         print(f"\n    标定结果:")
         print(f"    ┌─────────────────────────────────────┐")
         print(f"    │  闭合位置 (min): {min_pos:12.6f}     │")
         print(f"    │  张开位置 (max): {max_pos:12.6f}     │")
         print(f"    │  弧度行程 (rad): {stroke_rad:11.6f}     │")
-        print(f"    │  激光闭合 (m):   {laser_close:12.6f}     │" if laser_close else "    │  激光闭合 (m):   N/A                 │")
-        print(f"    │  激光张开 (m):   {laser_open:12.6f}     │" if laser_open else "    │  激光张开 (m):   N/A                 │")
+        print(f"    │  激光闭合 (m):   {laser_close_display}     │")
+        print(f"    │  激光张开 (m):   {laser_open_display}     │")
         print(f"    └─────────────────────────────────────┘")
         
         self.g.loggerUI.info(f"[标定完成] {part}: min={min_pos:.6f}, max={max_pos:.6f}, stroke_rad={stroke_rad:.6f}")
