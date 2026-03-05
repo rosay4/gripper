@@ -137,6 +137,10 @@ class CursesUI:
         self.hblog_follow = True
         self._last_scroll_time = 0
         self._scroll_boost = 1
+        ## 菜单分页
+        self.menu_items_per_page = 8  # 每页显示8个选项
+        self.menu_page = 0  # 当前页码
+        self._last_menu_key = None  # 用于检测菜单变化
 
     def run(self):
         curses.wrapper(self._main)
@@ -345,6 +349,12 @@ class CursesUI:
         except IndexError:
             title, menu = "No Menu", {}
 
+        # 检测菜单是否变化，如果变化则重置页码
+        menu_key = id(menu)
+        if menu_key != self._last_menu_key:
+            self.menu_page = 0
+            self._last_menu_key = menu_key
+
         # 标题
         t = f" {title} "
         try:
@@ -352,8 +362,22 @@ class CursesUI:
         except curses.error as e:
             print(e)
 
+        # 计算分页
+        menu_items = list(menu.items())
+        total_items = len(menu_items)
+        total_pages = max(1, (total_items + self.menu_items_per_page - 1) // self.menu_items_per_page)
+        
+        # 确保页码在有效范围内
+        self.menu_page = max(0, min(self.menu_page, total_pages - 1))
+        
+        # 获取当前页的菜单项
+        start_idx = self.menu_page * self.menu_items_per_page
+        end_idx = min(start_idx + self.menu_items_per_page, total_items)
+        current_page_items = menu_items[start_idx:end_idx]
+
         y = 1
-        for key, item in menu.items():
+        # 显示当前页的菜单项
+        for key, item in current_page_items:
             text = f"[{key}] {item.get('description','')}"
             try:
                 w.addstr(y, 2, text[:w.getmaxyx()[1]-4])
@@ -374,6 +398,14 @@ class CursesUI:
             w.addstr(y+2, 2, "[d] 删除log文件"[:w.getmaxyx()[1]-4])
         except curses.error as e:
             print(e)
+
+        # 显示分页信息（如果有多个页面）
+        if total_pages > 1:
+            page_info = f" 页 {self.menu_page + 1}/{total_pages} [↑/↓翻页] "
+            try:
+                w.addstr(0, w.getmaxyx()[1] - len(page_info) - 2, page_info, curses.A_DIM)
+            except curses.error:
+                pass
 
         w.noutrefresh()
     def _draw_log(self):
@@ -463,6 +495,33 @@ class CursesUI:
             if key == -1:
                 return
         except:
+            return
+        
+        # 处理翻页按键（在转换为字符之前）
+        if key == curses.KEY_UP:
+            # 翻到上一页
+            try:
+                title, menu = self.guide.menu_stack[-1]
+                total_pages = max(1, (len(menu) + self.menu_items_per_page - 1) // self.menu_items_per_page)
+                if total_pages > 1:
+                    self.menu_page = max(0, self.menu_page - 1)
+                    self._draw_menu()
+                    curses.doupdate()
+            except IndexError:
+                pass
+            return
+        
+        if key == curses.KEY_DOWN:
+            # 翻到下一页
+            try:
+                title, menu = self.guide.menu_stack[-1]
+                total_pages = max(1, (len(menu) + self.menu_items_per_page - 1) // self.menu_items_per_page)
+                if total_pages > 1:
+                    self.menu_page = min(total_pages - 1, self.menu_page + 1)
+                    self._draw_menu()
+                    curses.doupdate()
+            except IndexError:
+                pass
             return
         
         if key == curses.KEY_MOUSE:
