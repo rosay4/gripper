@@ -521,31 +521,37 @@ class GripperGuide(BaseGuide):
                 ),
             },
             "2": {
+                "description": "set: 跟踪误差窗口=10000000",
+                "callback": lambda: self.motion.set_following_error_window_10000000(
+                    part=self.selected_gripper,
+                ),
+            },
+            "3": {
                 "description": "set: point mode step",
                 "callback": self.motion.set_manual_control_step,
             },
-            "3": {
+            "4": {
                 "description": "reset: 重置yaml参数为默认值并加载",
                 "callback": lambda: self.motion.manual_calibration_reset_yaml_and_reload(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "4": {
+            "5": {
                 "description": "【阶段1】方案B: 自动张开到最大(记录rad1+laser)",
                 "callback": lambda: self.motion.auto_open_to_max(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "5": {
+            "6": {
                 "description": "【阶段1】方案B: 自动闭合(记录rad2+laser)",
                 "callback": lambda: self.motion.auto_close_to_min(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "6": {
+            "7": {
                 "description": "【阶段1】计算并写入length_per_radian",
                 "callback": lambda: self.motion.calculate_and_write_length_per_radian(
                     part=self.selected_gripper,

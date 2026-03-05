@@ -553,45 +553,42 @@ class MotionModule:
 
     @hide_ui_while
     def sync_yaml_params_to_ui(self, part: str, pos_name: str = "gripper_pos"):
-        """同步当前yaml文件的参数到UI（读取yaml并下发到电机）"""
+        """同步当前yaml文件的参数到UI（重新加载yaml并下发到电机）"""
         print("=== 同步yaml参数到UI ===")
         print(f"夹爪: {part}")
         
+        # 读取当前yaml文件的参数用于显示
         try:
-            # 读取当前yaml文件的参数
             yaml_path = self._get_gripper_yaml_path(part)
-            import yaml
             with open(yaml_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
             
-            # 获取参数
             length_per_radian = config.get('length_per_radian', 1.0)
             offset_at_hardware_zero = config.get('offset_at_hardware_zero', 0.0)
             
             print(f"读取到yaml参数:")
             print(f"  length_per_radian = {length_per_radian}")
             print(f"  offset_at_hardware_zero = {offset_at_hardware_zero}")
-            
-            # 下发参数到电机
-            try:
-                self.g.robot.send_command(part, {
-                    "command": "set_gripper_params",
-                    "length_per_radian": length_per_radian,
-                    "offset_at_hardware_zero": offset_at_hardware_zero,
-                })
-                print(f"参数已下发到电机")
-                self.g.loggerUI.info(f"yaml参数同步到UI成功: {part}, length_per_radian={length_per_radian}, offset={offset_at_hardware_zero}")
-            except Exception as e:
-                print(f"下发参数到电机失败: {e}")
-                self.g.loggerUI.error(f"下发参数到电机失败: {e}")
-                input("按回车返回")
-                return
-                
         except Exception as e:
             print(f"读取yaml文件失败: {e}")
             self.g.loggerUI.error(f"读取yaml文件失败: {e}")
             input("按回车返回")
             return
+        
+        # 使用reload_robot_from_yaml重新加载yaml并下发到电机
+        if hasattr(self.g, "reload_robot_from_yaml"):
+            try:
+                self.g.reload_robot_from_yaml()
+                self.g.loggerUI.info(f"yaml参数同步到UI成功: {part}, length_per_radian={length_per_radian}, offset={offset_at_hardware_zero}")
+                print("robot reload done, 参数已下发到电机")
+            except Exception as e:
+                self.g.loggerUI.error(f"robot reload failed: {e}")
+                print(f"robot reload failed: {e}")
+                input("按回车返回")
+                return
+        else:
+            self.g.loggerUI.warn("reload_robot_from_yaml() not found, restart guide manually")
+            print("reload function not found, please restart guide manually")
         
         print("\n参数同步完成")
         input("按回车返回")
