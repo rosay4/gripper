@@ -521,7 +521,7 @@ class GripperGuide(BaseGuide):
                 ),
             },
             "2": {
-                "description": "run: 自动参数矫正",
+                "description": "run: 自动参数矫正(旧版)",
                 "callback": lambda: self.motion.calibrate_gripper_kinematic_params_auto(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
@@ -548,6 +548,56 @@ class GripperGuide(BaseGuide):
                 "callback": lambda: self.motion.manual_calibration_reset_yaml_and_reload(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
+                ),
+            },
+            "7": {
+                "description": "【阶段1】方案A: 点动张开到最大(记录rad1+laser)",
+                "callback": lambda: self.motion.manual_open_by_step_to_max(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
+            "8": {
+                "description": "【阶段1】方案B: 自动张开到最大(记录rad1+laser)",
+                "callback": lambda: self.motion.auto_open_to_max(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
+            "9": {
+                "description": "【阶段1】方案C: 暂停模式张开(记录rad1+laser)",
+                "callback": lambda: self.motion.pause_and_manual_adjust(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                    direction="open",
+                ),
+            },
+            "10": {
+                "description": "【阶段1】方案A: 点动闭合(记录rad2+laser)",
+                "callback": lambda: self.motion.manual_close_by_step_to_min(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
+            "11": {
+                "description": "【阶段1】方案B: 自动闭合(记录rad2+laser)",
+                "callback": lambda: self.motion.auto_close_to_min(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
+            "12": {
+                "description": "【阶段1】方案C: 暂停模式闭合(记录rad2+laser)",
+                "callback": lambda: self.motion.pause_and_manual_adjust(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                    direction="close",
+                ),
+            },
+            "13": {
+                "description": "【阶段1】计算并写入length_per_radian",
+                "callback": lambda: self.motion.calculate_and_write_length_per_radian(
+                    part=self.selected_gripper,
                 ),
             },
         }

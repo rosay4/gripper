@@ -617,6 +617,435 @@ class MotionModule:
         input("Press Enter to return")
 
     @hide_ui_while
+    def auto_open_to_max(self, part: str, pos_name: str = "gripper_pos"):
+        """
+        自动持续张开夹爪到最大位置
+        使用位置变化判断或电机状态判断
+        """
+        print("=== 自动张开夹爪到最大 ===")
+        print("判断条件: 连续5次位置变化<0.0001 或 电机堵转")
+        
+        step = self.manual_control_step
+        check_interval = 0.1  # 检测间隔100ms
+        stable_threshold = 0.0001
+        stable_count_required = 5
+        max_duration = 30.0  # 最大30秒
+        
+        print(f"步长: {step:.6f}, 检测间隔: {check_interval}s")
+        input("按回车开始自动张开...")
+        
+        start_time = time.time()
+        last_pos = None
+        stable_count = 0
+        positions_history = []
+        
+        print("开始自动张开...")
+        while time.time() - start_time < max_duration:
+            # 获取当前位置
+            cur = self._get_feedback_scalar(pos_name)
+            if cur is None:
+                print("无法获取当前位置")
+                break
+            
+            # 计算新位置
+            new_pos = cur + step
+            
+            # 下发命令
+            self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
+            
+            # 等待并检测
+            time.sleep(check_interval)
+            actual = self._get_feedback_scalar(pos_name)
+            
+            if actual is not None:
+                positions_history.append(actual)
+                if len(positions_history) > stable_count_required:
+                    positions_history.pop(0)
+                
+                # 检查是否稳定
+                if len(positions_history) >= stable_count_required:
+                    max_diff = max(positions_history) - min(positions_history)
+                    if max_diff < stable_threshold:
+                        print(f"位置已稳定，变化量: {max_diff:.6f}")
+                        stable_count += 1
+                        if stable_count >= 3:  # 连续3次稳定
+                            print("检测到夹爪已到达最大位置")
+                            break
+                    else:
+                        stable_count = 0
+                
+                # 显示进度
+                if int((time.time() - start_time) * 10) % 10 == 0:
+                    print(f"当前位置: {actual:.6f}, 历史变化: {max(positions_history)-min(positions_history):.6f if positions_history else 0:.6f}")
+        
+        # 稳定2秒后读取数据
+        print("稳定2秒后读取数据...")
+        time.sleep(2.0)
+        
+        final_pos = self._get_feedback_scalar(pos_name)
+        laser_dist = self._get_feedback_scalar("real_distance")
+        
+        print(f"\n=== 自动张开完成 ===")
+        print(f"rad1 = {final_pos:.6f}")
+        print(f"laser_open = {laser_dist:.6f}")
+        
+        self.g.loggerUI.info(f"自动张开完成: rad1={final_pos:.6f}, laser_open={laser_dist:.6f}")
+        
+        # 保存到临时存储（用于后续计算）
+        self._calibration_temp = {
+            "rad1": final_pos,
+            "laser_open": laser_dist
+        }
+        
+        input("按回车返回菜单")
+        return final_pos, laser_dist
+
+    @hide_ui_while
+    def auto_close_to_min(self, part: str, pos_name: str = "gripper_pos"):
+        """
+        自动持续闭合夹爪到最小位置
+        """
+        print("=== 自动闭合夹爪到最小 ===")
+        
+        step = self.manual_control_step
+        check_interval = 0.1
+        stable_threshold = 0.0001
+        stable_count_required = 5
+        max_duration = 30.0
+        
+        print(f"步长: {step:.6f}, 检测间隔: {check_interval}s")
+        input("按回车开始自动闭合...")
+        
+        start_time = time.time()
+        stable_count = 0
+        positions_history = []
+        
+        print("开始自动闭合...")
+        while time.time() - start_time < max_duration:
+            cur = self._get_feedback_scalar(pos_name)
+            if cur is None:
+                break
+            
+            new_pos = cur - step  # 闭合是减小位置
+            self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
+            
+            time.sleep(check_interval)
+            actual = self._get_feedback_scalar(pos_name)
+            
+            if actual is not None:
+                positions_history.append(actual)
+                if len(positions_history) > stable_count_required:
+                    positions_history.pop(0)
+                
+                if len(positions_history) >= stable_count_required:
+                    max_diff = max(positions_history) - min(positions_history)
+                    if max_diff < stable_threshold:
+                        stable_count += 1
+                        if stable_count >= 3:
+                            print("检测到夹爪已闭合到位")
+                            break
+                    else:
+                        stable_count = 0
+        
+        print("稳定2秒后读取数据...")
+        time.sleep(2.0)
+        
+        final_pos = self._get_feedback_scalar(pos_name)
+        laser_dist = self._get_feedback_scalar("real_distance")
+        
+        print(f"\n=== 自动闭合完成 ===")
+        print(f"rad2 = {final_pos:.6f}")
+        print(f"laser_close = {laser_dist:.6f}")
+        
+        self.g.loggerUI.info(f"自动闭合完成: rad2={final_pos:.6f}, laser_close={laser_dist:.6f}")
+        
+        # 更新临时存储
+        if hasattr(self, '_calibration_temp'):
+            self._calibration_temp["rad2"] = final_pos
+            self._calibration_temp["laser_close"] = laser_dist
+        else:
+            self._calibration_temp = {
+                "rad2": final_pos,
+                "laser_close": laser_dist
+            }
+        
+        input("按回车返回菜单")
+        return final_pos, laser_dist
+
+    @hide_ui_while
+    def pause_and_manual_adjust(self, part: str, pos_name: str = "gripper_pos", direction: str = "open"):
+        """
+        方案C: 暂停模式，关闭使能，用户手动调整夹爪
+        direction: "open" 或 "close"
+        """
+        action = "张开" if direction == "open" else "闭合"
+        print(f"=== 方案C: 手动调整夹爪{action} ===")
+        print("此模式将临时关闭电机使能（抱闸释放）")
+        print(f"请手动将夹爪{action}到最大位置")
+        
+        input("按回车关闭使能并进入手动调整模式...")
+        
+        try:
+            # 关闭电机使能
+            self.g.robot.send_command(part, {"command": "set_control_mode", "mode": "disabled"})
+            print("✓ 电机使能已关闭，抱闸释放")
+            print("请现在手动调整夹爪...")
+        except Exception as e:
+            print(f"关闭使能失败: {e}")
+            self.g.loggerUI.error(f"关闭使能失败: {e}")
+            input("按回车返回")
+            return None, None
+        
+        input("调整完成后，按回车重新使能电机并读取数据...")
+        
+        try:
+            # 重新使能电机
+            self.g.robot.send_command(part, {"command": "set_control_mode", "mode": "position"})
+            time.sleep(0.5)  # 等待电机就绪
+            print("✓ 电机使能已恢复")
+        except Exception as e:
+            print(f"重新使能失败: {e}")
+            self.g.loggerUI.error(f"重新使能失败: {e}")
+            input("按回车返回")
+            return None, None
+        
+        # 稳定2秒后读取
+        print("稳定2秒后读取数据...")
+        time.sleep(2.0)
+        
+        final_pos = self._get_feedback_scalar(pos_name)
+        laser_dist = self._get_feedback_scalar("real_distance")
+        
+        print(f"\n=== 手动调整完成 ===")
+        if direction == "open":
+            print(f"rad1 = {final_pos:.6f}")
+            print(f"laser_open = {laser_dist:.6f}")
+            self.g.loggerUI.info(f"手动张开: rad1={final_pos:.6f}, laser_open={laser_dist:.6f}")
+            key_rad = "rad1"
+            key_laser = "laser_open"
+        else:
+            print(f"rad2 = {final_pos:.6f}")
+            print(f"laser_close = {laser_dist:.6f}")
+            self.g.loggerUI.info(f"手动闭合: rad2={final_pos:.6f}, laser_close={laser_dist:.6f}")
+            key_rad = "rad2"
+            key_laser = "laser_close"
+        
+        # 保存到临时存储
+        if not hasattr(self, '_calibration_temp'):
+            self._calibration_temp = {}
+        self._calibration_temp[key_rad] = final_pos
+        self._calibration_temp[key_laser] = laser_dist
+        
+        input("按回车返回菜单")
+        return final_pos, laser_dist
+
+    @hide_ui_while
+    def calculate_and_write_length_per_radian(self, part: str):
+        """
+        计算并写入 length_per_radian
+        """
+        print("=== 计算 length_per_radian ===")
+        
+        # 检查是否有临时数据
+        if not hasattr(self, '_calibration_temp'):
+            print("错误: 没有标定数据，请先执行张开和闭合步骤")
+            input("按回车返回")
+            return
+        
+        temp = self._calibration_temp
+        rad1 = temp.get("rad1")
+        rad2 = temp.get("rad2")
+        laser_open = temp.get("laser_open")
+        laser_close = temp.get("laser_close")
+        
+        if rad1 is None or rad2 is None:
+            print("错误: 缺少 rad1 或 rad2 数据")
+            input("按回车返回")
+            return
+        
+        if laser_open is None or laser_close is None:
+            print("错误: 缺少激光数据")
+            input("按回车返回")
+            return
+        
+        # 计算
+        real_distance = laser_open - laser_close
+        delta_rad = abs(rad1 - rad2)
+        
+        if delta_rad < 1e-9:
+            print(f"错误: 角度变化过小 ({delta_rad:.10f})")
+            input("按回车返回")
+            return
+        
+        length_per_radian = real_distance / (2000.0 * delta_rad)
+        length_per_radian_10 = round(length_per_radian, 10)
+        
+        print(f"\n计算结果:")
+        print(f"  rad1 = {rad1:.6f}")
+        print(f"  rad2 = {rad2:.6f}")
+        print(f"  delta_rad = {delta_rad:.6f}")
+        print(f"  laser_open = {laser_open:.6f}")
+        print(f"  laser_close = {laser_close:.6f}")
+        print(f"  real_distance = {real_distance:.6f}")
+        print(f"  length_per_radian = {length_per_radian_10:.10f}")
+        
+        # 写入YAML
+        try:
+            yaml_path = self._write_gripper_yaml_params(
+                part=part,
+                length_per_radian=length_per_radian_10,
+            )
+            print(f"\n✓ 已写入 {yaml_path}")
+            self.g.loggerUI.info(f"length_per_radian 计算完成: {length_per_radian_10:.10f}, 已写入 {yaml_path}")
+            
+            # 清理临时数据
+            delattr(self, '_calibration_temp')
+            
+        except Exception as e:
+            print(f"写入YAML失败: {e}")
+            self.g.loggerUI.error(f"写入YAML失败: {e}")
+        
+        input("按回车返回菜单")
+
+    @hide_ui_while
+    def manual_open_by_step_to_max(self, part: str, pos_name: str = "gripper_pos"):
+        """
+        方案A: 手动点按模式张开夹爪到最大位置
+        按 W 键逐步张开，按 Q 键结束并记录当前位置
+        """
+        print("=== 方案A: 手动点按模式张开夹爪 ===")
+        print("提示: 按 W 键逐步张开夹爪，按 Q 键结束并记录rad1和laser")
+        print(f"当前步长: {self.manual_control_step:.6f}")
+        
+        input("按回车开始手动控制模式...")
+        
+        self.manual_control_active = True
+        self.manual_data_name = pos_name
+        self.manual_part = part
+        
+        print("\n开始手动控制，按 W 张开，按 Q 结束并记录")
+        
+        last_pos = None
+        while self.manual_control_active:
+            try:
+                ch = input("按 W 张开 / 按 Q 结束并记录: ").strip().lower()
+                
+                if ch == 'q':
+                    # 稳定2秒后记录
+                    print("稳定2秒后记录数据...")
+                    time.sleep(2.0)
+                    cur = self._get_feedback_scalar(pos_name)
+                    laser_dist = self._get_feedback_scalar("real_distance")
+                    last_pos = cur
+                    self.manual_control_active = False
+                    print(f"\n=== 手动张开完成 ===")
+                    print(f"rad1 = {cur:.6f}")
+                    print(f"laser_open = {laser_dist:.6f}")
+                    self.g.loggerUI.info(f"手动张开完成: rad1={cur:.6f}, laser_open={laser_dist:.6f}")
+                    
+                    # 保存到临时存储
+                    if not hasattr(self, '_calibration_temp'):
+                        self._calibration_temp = {}
+                    self._calibration_temp["rad1"] = cur
+                    self._calibration_temp["laser_open"] = laser_dist
+                    break
+                    
+                elif ch == 'w':
+                    # 获取当前位置并增加步长
+                    cur = self._get_feedback_scalar(pos_name)
+                    if cur is None:
+                        print("无法获取当前位置")
+                        continue
+                    new_pos = cur + self.manual_control_step
+                    
+                    # 下发位置命令
+                    self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
+                    print(f"位置: {cur:.6f} -> {new_pos:.6f}")
+                    time.sleep(0.1)  # 短暂延迟让运动执行
+                    
+                    # 读取实际位置
+                    actual = self._get_feedback_scalar(pos_name)
+                    print(f"实际位置: {actual:.6f}")
+                else:
+                    print("无效输入，请按 W 或 Q")
+                    
+            except Exception as e:
+                print(f"错误: {e}")
+                self.g.loggerUI.error(f"手动控制错误: {e}")
+        
+        input("按回车返回菜单")
+        return last_pos
+
+    @hide_ui_while
+    def manual_close_by_step_to_min(self, part: str, pos_name: str = "gripper_pos"):
+        """
+        方案A: 手动点按模式闭合夹爪到最小位置
+        按 S 键逐步闭合，按 Q 键结束并记录当前位置
+        """
+        print("=== 方案A: 手动点按模式闭合夹爪 ===")
+        print("提示: 按 S 键逐步闭合夹爪，按 Q 键结束并记录rad2和laser")
+        print(f"当前步长: {self.manual_control_step:.6f}")
+        
+        input("按回车开始手动控制模式...")
+        
+        self.manual_control_active = True
+        self.manual_data_name = pos_name
+        self.manual_part = part
+        
+        print("\n开始手动控制，按 S 闭合，按 Q 结束并记录")
+        
+        last_pos = None
+        while self.manual_control_active:
+            try:
+                ch = input("按 S 闭合 / 按 Q 结束并记录: ").strip().lower()
+                
+                if ch == 'q':
+                    # 稳定2秒后记录
+                    print("稳定2秒后记录数据...")
+                    time.sleep(2.0)
+                    cur = self._get_feedback_scalar(pos_name)
+                    laser_dist = self._get_feedback_scalar("real_distance")
+                    last_pos = cur
+                    self.manual_control_active = False
+                    print(f"\n=== 手动闭合完成 ===")
+                    print(f"rad2 = {cur:.6f}")
+                    print(f"laser_close = {laser_dist:.6f}")
+                    self.g.loggerUI.info(f"手动闭合完成: rad2={cur:.6f}, laser_close={laser_dist:.6f}")
+                    
+                    # 保存到临时存储
+                    if not hasattr(self, '_calibration_temp'):
+                        self._calibration_temp = {}
+                    self._calibration_temp["rad2"] = cur
+                    self._calibration_temp["laser_close"] = laser_dist
+                    break
+                    
+                elif ch == 's':
+                    # 获取当前位置并减小步长（闭合）
+                    cur = self._get_feedback_scalar(pos_name)
+                    if cur is None:
+                        print("无法获取当前位置")
+                        continue
+                    new_pos = cur - self.manual_control_step  # 闭合是减小位置
+                    
+                    # 下发位置命令
+                    self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
+                    print(f"位置: {cur:.6f} -> {new_pos:.6f}")
+                    time.sleep(0.1)  # 短暂延迟让运动执行
+                    
+                    # 读取实际位置
+                    actual = self._get_feedback_scalar(pos_name)
+                    print(f"实际位置: {actual:.6f}")
+                else:
+                    print("无效输入，请按 S 或 Q")
+                    
+            except Exception as e:
+                print(f"错误: {e}")
+                self.g.loggerUI.error(f"手动控制错误: {e}")
+        
+        input("按回车返回菜单")
+        return last_pos
+
+    @hide_ui_while
     def repeatability_position_accuracy_test(self, part: str, pos_name: str):
         repeats = 10
         targets = [0.005, 0.045]
