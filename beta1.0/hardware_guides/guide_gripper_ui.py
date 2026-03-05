@@ -538,20 +538,27 @@ class GripperGuide(BaseGuide):
                 ),
             },
             "5": {
+                "description": "【参考已有完整流程】自动标定并设零",
+                "callback": lambda: self.motion.full_auto_calibration(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
+            "6": {
                 "description": "【阶段1】方案B: 自动张开到最大(记录rad1+laser)",
                 "callback": lambda: self.motion.auto_open_to_max(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "6": {
+            "7": {
                 "description": "【阶段1】方案B: 自动闭合(记录rad2+laser)",
                 "callback": lambda: self.motion.auto_close_to_min(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "7": {
+            "8": {
                 "description": "【阶段1】计算并写入length_per_radian",
                 "callback": lambda: self.motion.calculate_and_write_length_per_radian(
                     part=self.selected_gripper,

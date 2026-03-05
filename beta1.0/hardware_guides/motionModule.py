@@ -596,6 +596,312 @@ class MotionModule:
         
         print("\n参数同步完成")
         input("按回车返回")
+    
+    def _calibrate_gripper_climb(self, part: str, pos_name: str, direction_sign: int, 
+                                  target_speed: float = 1.0, ctrl_freq: int = 100,
+                                  pos_threshold: float = 0.00001, stable_target: int = 15) -> float:
+        """
+        通过位置爬坡模拟匀速运动进行标定（堵转检测）
+        
+        Args:
+            part: 夹爪部件名
+            pos_name: 位置反馈数据名
+            direction_sign: -1 (向内闭合), 1 (向外打开)
+            target_speed: 目标速度 (单位/秒)
+            ctrl_freq: 控制频率 (Hz)
+            pos_threshold: 判断堵转的位置变化阈值
+            stable_target: 连续多少次位置不变认为堵转
+            
+        Returns:
+            最终位置值
+        """
+        dt = 1.0 / ctrl_freq
+        step = target_speed * dt
+        
+        direction_str = "闭合" if direction_sign == -1 else "张开"
+        print(f"\n>>> 开始标定{direction_str}位置 (速度: {target_speed}, 方向: {direction_sign})")
+        print(f"    控制频率: {ctrl_freq}Hz, 步长: {step:.6f}, 堵转阈值: {pos_threshold}")
+        
+        # 获取起始位置
+        start_pos = self._get_feedback_scalar(pos_name)
+        if start_pos is None:
+            start_pos = 0.0
+        command_pos = start_pos
+        last_actual_pos = start_pos
+        stable_count = 0
+        
+        print(f"    起始位置: {start_pos:.6f}")
+        print("    开始位置爬坡... (按Ctrl+C可中断)")
+        
+        last_print_time = time.time()
+        start_time = time.time()
+        
+        try:
+            while True:
+                # 1. 更新指令位置
+                command_pos += step * direction_sign
+                
+                # 2. 发送位置指令
+                self.g.robot.set_actions({part: {"type": "position", "position": [command_pos]}})
+                
+                # 3. 等待一个周期
+                time.sleep(dt)
+                
+                # 4. 获取当前实际位置
+                current_actual_pos = self._get_feedback_scalar(pos_name)
+                if current_actual_pos is None:
+                    current_actual_pos = last_actual_pos
+                
+                # 5. 获取激光测距仪数据
+                real_distance = self._get_feedback_scalar("real_distance")
+                
+                # 6. 堵转检测
+                if abs(current_actual_pos - last_actual_pos) < pos_threshold:
+                    stable_count += 1
+                else:
+                    stable_count = 0
+                
+                # 7. 实时显示（每0.5秒）
+                current_time = time.time()
+                if current_time - last_print_time >= 0.5:
+                    elapsed = current_time - start_time
+                    laser_str = f", 激光: {real_distance:.4f}" if real_distance is not None else ""
+                    print(f"    [{elapsed:5.1f}s] 位置: {current_actual_pos:8.6f}, "
+                          f"指令: {command_pos:8.6f}, 稳定计数: {stable_count:2d}/{stable_target}{laser_str}")
+                    last_print_time = current_time
+                
+                # 8. 检测到堵转
+                if stable_count >= stable_target:
+                    # 停止更新，保持在当前位置
+                    self.g.robot.set_actions({part: {"type": "position", "position": [current_actual_pos]}})
+                    elapsed = time.time() - start_time
+                    print(f"\n    ✓ 检测到机械限位！")
+                    print(f"      最终位置: {current_actual_pos:.6f}")
+                    print(f"      总耗时: {elapsed:.2f}秒")
+                    return current_actual_pos
+                
+                last_actual_pos = current_actual_pos
+                
+        except KeyboardInterrupt:
+            print("\n    ! 用户中断标定")
+            # 停止运动
+            current_pos = self._get_feedback_scalar(pos_name)
+            if current_pos is not None:
+                self.g.robot.set_actions({part: {"type": "position", "position": [current_pos]}})
+            raise
+
+    def _smooth_move_to(self, part: str, pos_name: str, target: float, duration: float = 2.0):
+        """
+        平滑地将夹爪移动到目标位置
+        
+        Args:
+            part: 夹爪部件名
+            pos_name: 位置反馈数据名
+            target: 目标位置
+            duration: 移动持续时间（秒）
+        """
+        steps = int(duration * 100)  # 100Hz
+        dt = 0.01
+        
+        start_pos = self._get_feedback_scalar(pos_name)
+        if start_pos is None:
+            start_pos = 0.0
+        
+        print(f"\n>>> 平滑移动至目标: {target:.6f} (预计耗时 {duration}s)")
+        print(f"    起始位置: {start_pos:.6f}")
+        
+        # 第一阶段：发送平滑插值指令
+        for i in range(steps + 1):
+            alpha = i / float(steps)
+            curr_cmd = start_pos + (target - start_pos) * alpha
+            self.g.robot.set_actions({part: {"type": "position", "position": [curr_cmd]}})
+            time.sleep(dt)
+        
+        # 第二阶段：等待实际到达目标位置
+        print("    等待到位...")
+        wait_start = time.time()
+        max_wait = 3.0
+        
+        while time.time() - wait_start < max_wait:
+            current_pos = self._get_feedback_scalar(pos_name)
+            if current_pos is not None and abs(current_pos - target) <= 0.001:
+                print(f"    ✓ 移动到位: {current_pos:.6f}")
+                return
+            self.g.robot.set_actions({part: {"type": "position", "position": [target]}})
+            time.sleep(dt)
+        
+        print(f"    ! 等待到位超时")
+
+    @hide_ui_while
+    def full_auto_calibration(self, part: str, pos_name: str = "gripper_pos"):
+        """
+        【参考已有完整流程】自动标定并设零
+        
+        完整流程：
+        1. 自动重置yaml参数为 length_per_radian=1.0, offset_at_hardware_zero=0.0
+        2. 寻找负向极限（闭合）
+        3. 寻找正向极限（全开）
+        4. 计算行程
+        5. 移动到中间位置
+        6. 在中间位置设零
+        
+        参考: rb_gripper_calibration_single.py
+        """
+        print("=" * 60)
+        print("【参考已有完整流程】自动标定并设零")
+        print("=" * 60)
+        print(f"夹爪: {part}")
+        print()
+        
+        # ========== 步骤0: 重置参数 ==========
+        print(">>> 步骤0: 重置yaml参数为默认值")
+        try:
+            yaml_path = self._write_gripper_yaml_params(
+                part=part,
+                length_per_radian=1.0,
+                offset_at_hardware_zero=0.0,
+            )
+            print(f"    ✓ 参数已重置: length_per_radian=1.0, offset_at_hardware_zero=0.0")
+            print(f"      文件: {yaml_path}")
+        except Exception as e:
+            print(f"    ✗ 重置yaml失败: {e}")
+            self.g.loggerUI.error(f"重置yaml失败: {e}")
+            input("按回车返回")
+            return
+        
+        # 重新加载
+        if hasattr(self.g, "reload_robot_from_yaml"):
+            try:
+                self.g.reload_robot_from_yaml()
+                print(f"    ✓ 重新加载完成")
+            except Exception as e:
+                print(f"    ✗ 重新加载失败: {e}")
+                input("按回车返回")
+                return
+        else:
+            print("    ! reload_robot_from_yaml() 未找到，请手动重启")
+            input("按回车返回")
+            return
+        
+        # 等待硬件就绪
+        print("\n>>> 等待硬件启动...")
+        max_wait = 30
+        wait_start = time.time()
+        while time.time() - wait_start < max_wait:
+            # 检查是否可以通过获取位置来判断就绪
+            test_pos = self._get_feedback_scalar(pos_name)
+            if test_pos is not None:
+                print(f"    ✓ 硬件已就绪")
+                break
+            time.sleep(0.5)
+        else:
+            print("    ✗ 等待硬件就绪超时")
+            input("按回车返回")
+            return
+        
+        # 取消限位（允许超限运动）
+        print(">>> 取消硬件限位...")
+        try:
+            self.g.robot.send_command(part, {"command": "set_limit", "enabled": [False], "lower": [-0.5], "upper": [0.5]})
+            print(f"    ✓ 限位已取消")
+        except Exception as e:
+            print(f"    ! 取消限位失败（可能不影响）: {e}")
+        
+        # ========== 步骤1: 寻找负向极限（闭合） ==========
+        print("\n" + "=" * 60)
+        print(">>> 步骤1: 寻找负向极限（闭合）")
+        print("=" * 60)
+        
+        try:
+            min_pos = self._calibrate_gripper_climb(part, pos_name, direction_sign=-1)
+        except KeyboardInterrupt:
+            print("\n标定被用户中断")
+            input("按回车返回")
+            return
+        except Exception as e:
+            print(f"\n标定失败: {e}")
+            self.g.loggerUI.error(f"闭合标定失败: {e}")
+            input("按回车返回")
+            return
+        
+        print(f"\n    闭合位置记录: {min_pos:.6f}")
+        time.sleep(1.0)
+        
+        # ========== 步骤2: 寻找正向极限（全开） ==========
+        print("\n" + "=" * 60)
+        print(">>> 步骤2: 寻找正向极限（全开）")
+        print("=" * 60)
+        
+        try:
+            max_pos = self._calibrate_gripper_climb(part, pos_name, direction_sign=1)
+        except KeyboardInterrupt:
+            print("\n标定被用户中断")
+            input("按回车返回")
+            return
+        except Exception as e:
+            print(f"\n标定失败: {e}")
+            self.g.loggerUI.error(f"张开标定失败: {e}")
+            input("按回车返回")
+            return
+        
+        print(f"\n    张开位置记录: {max_pos:.6f}")
+        
+        # ========== 步骤3: 计算并输出 ==========
+        print("\n" + "=" * 60)
+        print(">>> 步骤3: 标定报告")
+        print("=" * 60)
+        
+        stroke = abs(max_pos - min_pos)
+        print(f"\n    标定结果:")
+        print(f"    ┌─────────────────────────────────────┐")
+        print(f"    │  闭合位置 (min): {min_pos:12.6f}     │")
+        print(f"    │  张开位置 (max): {max_pos:12.6f}     │")
+        print(f"    │  总行程 (stroke): {stroke:11.6f}     │")
+        print(f"    └─────────────────────────────────────┘")
+        
+        self.g.loggerUI.info(f"[标定完成] {part}: min={min_pos:.6f}, max={max_pos:.6f}, stroke={stroke:.6f}")
+        
+        # ========== 步骤4: 移动到中间位置并设零 ==========
+        print("\n" + "=" * 60)
+        print(">>> 步骤4: 移动至中间位置并设零")
+        print("=" * 60)
+        
+        mid_pos = (min_pos + max_pos) / 2.0
+        print(f"\n    目标中间位置: {mid_pos:.6f}")
+        
+        try:
+            self._smooth_move_to(part, pos_name, mid_pos, duration=2.0)
+            time.sleep(0.5)  # 等待稳定
+            
+            # 获取最终位置
+            final_pos = self._get_feedback_scalar(pos_name)
+            print(f"\n    当前位置: {final_pos:.6f}")
+            print(f"    执行硬件设零...")
+            
+            self.set_zero(part=part)
+            
+            print(f"\n    ✓ 设零完成！")
+            print(f"      中间位置已被标记为零点")
+            
+            self.g.loggerUI.info(f"[设零完成] {part} 在中间位置 {mid_pos:.6f} 设零")
+            
+        except Exception as e:
+            print(f"\n    ✗ 移动或设零失败: {e}")
+            self.g.loggerUI.error(f"移动或设零失败: {e}")
+        
+        # ========== 完成 ==========
+        print("\n" + "=" * 60)
+        print("【参考已有完整流程】自动标定并设零 - 完成")
+        print("=" * 60)
+        print(f"\n    最终参数:")
+        print(f"      length_per_radian = 1.0 (默认值)")
+        print(f"      offset_at_hardware_zero = 0.0 (默认值)")
+        print(f"      零点位置 = 中间位置 ({mid_pos:.6f})")
+        print(f"\n    提示: 如需计算实际的 length_per_radian，")
+        print(f"          请使用激光测距仪测量实际行程后手动计算")
+        
+        input("\n按回车返回")
+
 
     @hide_ui_while
     def manual_calibration_open_to_max(self, part: str, pos_name: str = "gripper_pos"):
