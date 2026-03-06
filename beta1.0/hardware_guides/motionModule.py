@@ -1284,15 +1284,55 @@ class MotionModule:
         print(f"夹爪: {part}")
         print(f"\n    恢复的标定数据:")
         print(f"      length_per_radian = {length_per_radian_10:.10f}")
-        print(f"      min_pos = {min_pos:.6f}")
+        print(f"      min_pos = {min_pos:.6f} (阶段1记录值，仅供参考)")
+        
+        # ========== 步骤4.5: 等待系统稳定并同步当前位置 ==========
+        print("\n" + "=" * 60)
+        print(">>> 步骤4.5: 等待系统稳定并同步当前位置")
+        print("=" * 60)
+        print("\n    重新加载参数后，等待电机位置反馈稳定...")
+        time.sleep(0.5)  # 等待0.5秒让系统稳定
+        
+        # 读取当前实际位置（改完length_per_radian后的真实位置）
+        current_actual_pos = self._get_feedback_scalar(pos_name)
+        current_laser = self._get_feedback_scalar("real_distance")
+        print(f"\n    读取到的位置: {current_actual_pos:.6f}")
+        if current_laser is not None:
+            print(f"    当前激光距离: {current_laser:.2f}mm")
+        
+        # 检查位置是否合理（如果接近min_pos，说明需要同步）
+        if abs(current_actual_pos - min_pos) < 0.01:
+            print(f"\n    ! 警告: 位置读数({current_actual_pos:.6f})接近阶段1的min_pos({min_pos:.6f})")
+            print(f"      这可能是因为电机控制器缓存了旧的位置值")
+            print(f"      尝试通过发送当前位置指令来同步...")
+            
+            # 发送一个小的位置指令来刷新电机控制器的状态
+            # 先读取激光距离，确认实际位置
+            if current_laser is not None:
+                # 根据激光距离估算应该的位置值
+                # 激光5mm对应的位置大约是 min_pos * length_per_radian_10 ≈ 0.0015
+                expected_pos = min_pos * length_per_radian_10
+                print(f"\n    根据激光距离估算，当前位置应该是: {expected_pos:.6f}")
+                print(f"    发送位置指令来同步电机控制器...")
+                
+                # 发送当前估算位置作为目标
+                self.g.robot.set_actions({part: {"type": "position", "position": [expected_pos]}})
+                time.sleep(0.5)  # 等待指令生效
+                
+                # 再次读取位置
+                new_pos = self._get_feedback_scalar(pos_name)
+                print(f"    同步后位置: {new_pos:.6f}")
+            
+        print(f"\n    注意: 由于length_per_radian改变，位置数值已变化")
+        print(f"          阶段1的min_pos({min_pos:.6f})已不再适用")
         
         # ========== 步骤5: 移动到真正闭合位置（激光0±0.2mm） ==========
         print("\n" + "=" * 60)
         print(">>> 步骤5: 移动到真正闭合位置（激光0±0.2mm）")
         print("=" * 60)
         
-        # 从阶段1结束时的激光5mm位置，继续闭合到真正闭合位置（激光0±0.2mm）
-        print(f"\n    当前在激光5mm位置，继续闭合到真正闭合位置（激光0±0.2mm）...")
+        # 从当前实际位置开始，闭合到真正闭合位置（激光0±0.2mm）
+        print(f"\n    从当前位置继续闭合到真正闭合位置（激光0±0.2mm）...")
         try:
             # 使用爬坡方式闭合到激光0±0.2mm
             true_close_pos = self._calibrate_gripper_climb_to_laser(
