@@ -846,17 +846,6 @@ class MotionModule:
         start_pos = self._get_feedback_scalar(pos_name)
         if start_pos is None:
             start_pos = 0.0
-        
-        # 先发送当前位置指令，确保电机从当前实际位置开始
-        print(f"    同步电机位置到当前反馈位置: {start_pos:.6f}")
-        self.g.robot.set_actions({part: {"type": "position", "position": [start_pos]}})
-        time.sleep(0.5)  # 等待电机到位
-        
-        # 再次读取确认位置
-        start_pos = self._get_feedback_scalar(pos_name)
-        if start_pos is None:
-            start_pos = 0.0
-        
         command_pos = start_pos
         last_actual_pos = start_pos
         
@@ -869,7 +858,7 @@ class MotionModule:
         POS_STABLE_COUNT = 50          # 连续50次（0.5秒）稳定认为真正停止
         MAX_WAIT_TIME = 5.0            # 最大等待时间5秒
         
-        print(f"    确认起始位置: {start_pos:.6f}")
+        print(f"    起始位置: {start_pos:.6f}")
         print("    开始位置爬坡... (按Ctrl+C可中断)")
         
         last_print_time = time.time()
