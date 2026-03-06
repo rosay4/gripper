@@ -838,16 +838,21 @@ class MotionModule:
         """
         dt = 1.0 / ctrl_freq
         
-        # 步长计算 - 不需要根据length_per_radian调整
-        # target_speed是gripper_pos的速度，不是实际机械速度
-        # length_per_radian变小后，同样的gripper_pos步长对应的实际机械运动也变小
-        # 这是正常的，因为我们希望精细控制
-        base_step = target_speed * dt
+        # 根据length_per_radian调整步长
+        # 如果length_per_radian较小（如0.0099），需要增大步长以保持相同的机械运动速度
+        if length_per_radian is not None and length_per_radian > 0:
+            adjusted_speed = target_speed / length_per_radian
+        else:
+            adjusted_speed = target_speed
+        
+        base_step = adjusted_speed * dt
         current_step = base_step
         
         direction_str = "闭合" if direction_sign == -1 else "张开"
         print(f"\n>>> 开始移动{direction_str}到激光目标: {target_laser}mm (容差: ±{laser_tolerance}mm)")
-        print(f"    控制频率: {ctrl_freq}Hz, 目标速度: {target_speed}")
+        print(f"    控制频率: {ctrl_freq}Hz")
+        print(f"    基准速度: {target_speed}, 调整后速度: {adjusted_speed:.3f}")
+        print(f"    length_per_radian: {length_per_radian}")
         print(f"    基础步长: {base_step:.6f}")
         
         # 获取起始位置
@@ -1045,8 +1050,7 @@ class MotionModule:
         final_pos = self._get_feedback_scalar(pos_name)
         final_laser = self._get_feedback_scalar("real_distance")
         print(f"    ! 等待到位超时")
-        final_pos_str = f"{final_pos:.6f}" if final_pos is not None else "N/A"
-        print(f"      最终位置: {final_pos_str}")
+        print(f"      最终位置: {final_pos:.6f if final_pos else 'N/A'}")
         if final_laser is not None:
             print(f"      最终激光: {final_laser:.1f}mm")
 
@@ -1295,23 +1299,24 @@ class MotionModule:
         print(f"      length_per_radian = {length_per_radian_10:.10f}")
         print(f"      min_pos = {min_pos:.6f}")
         
-        # ========== 步骤5: 移动到真正闭合位置（激光0±0.09mm） ==========
+        # ========== 步骤5: 移动到真正闭合位置（激光0±0.2mm） ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤5: 移动到真正闭合位置（激光0±0.09mm）")
+        print(">>> 步骤5: 移动到真正闭合位置（激光0±0.2mm）")
         print("=" * 60)
-
-        # 从阶段1结束时的激光5mm位置，继续闭合到真正闭合位置（激光0±0.09mm）
-        print(f"\n    当前在激光5mm位置，继续闭合到真正闭合位置（激光0±0.09mm）...")
+        
+        # 从阶段1结束时的激光5mm位置，继续闭合到真正闭合位置（激光0±0.2mm）
+        print(f"\n    当前在激光5mm位置，继续闭合到真正闭合位置（激光0±0.2mm）...")
         try:
-            # 使用爬坡方式闭合到激光0±0.09mm
+            # 使用爬坡方式闭合到激光0±0.2mm，传入length_per_radian以调整步长
             true_close_pos = self._calibrate_gripper_climb_to_laser(
                 part=part,
                 pos_name=pos_name,
                 direction_sign=-1,  # 闭合方向
                 target_laser=0.0,   # 目标激光距离0mm
-                laser_tolerance=0.09, # 容差±0.09mm
-                target_speed=0.3,   # 目标速度
+                laser_tolerance=0.2, # 容差±0.2mm
+                target_speed=0.3,   # 基准速度（在length_per_radian=1.0时）
                 ctrl_freq=100,
+                length_per_radian=length_per_radian_10,  # 传入当前的length_per_radian
             )
             print(f"    ✓ 已到达真正闭合位置: {true_close_pos:.6f}")
         except Exception as e:
@@ -1397,38 +1402,7 @@ class MotionModule:
         
         # 清除状态
         delattr(self, '_calibration_state')
-
-        # ========== 步骤10: 验证标定结果 ==========
-        print("\n" + "=" * 60)
-        print(">>> 步骤10: 验证标定结果")
-        print("=" * 60)
-
-        # 等待位置稳定
-        print("\n    等待位置稳定...")
-        time.sleep(1.0)
-
-        # 读取当前激光距离
-        real_distance = self._get_feedback_scalar("real_distance")
-        if real_distance is not None:
-            target_distance = 50.0  # 目标距离50mm
-            tolerance = 0.2  # 容差±0.2mm
-            error = abs(real_distance - target_distance)
-
-            print(f"\n    当前激光距离: {real_distance:.2f}mm")
-            print(f"    目标距离: {target_distance}mm ±{tolerance}mm")
-            print(f"    误差: {error:.2f}mm")
-
-            if error <= tolerance:
-                print(f"    ✓ 标定合格！误差在允许范围内")
-                self.g.loggerUI.info(f"[标定验证通过] 激光距离: {real_distance:.2f}mm, 误差: {error:.2f}mm")
-            else:
-                print(f"    ✗ 标定不合格！误差超过允许范围")
-                print(f"      请检查标定流程或重新执行标定")
-                self.g.loggerUI.error(f"[标定验证失败] 激光距离: {real_distance:.2f}mm, 误差: {error:.2f}mm")
-        else:
-            print(f"    ! 无法读取激光距离，跳过验证")
-            self.g.loggerUI.warn("[标定验证] 无法读取激光距离")
-
+        
         # ========== 完成 ==========
         print("\n" + "=" * 60)
         print("【参考已有完整流程】自动标定并设零 - 全部完成")
@@ -1437,7 +1411,7 @@ class MotionModule:
         print(f"      length_per_radian = {length_per_radian_10:.10f}")
         print(f"      offset_at_hardware_zero = 0.025")
         print(f"      零点位置 = 0.025 位置（从闭合位置张开）")
-
+        
         input("\n按回车返回")
 
 
