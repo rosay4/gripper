@@ -654,64 +654,73 @@ class MotionModule:
         
         try:
             while True:
-                # 获取激光测距仪数据（用于调整步长和停止判断）
-                real_distance = self._get_feedback_scalar("real_distance")
-                
-                # 根据激光距离调整步长
-                if real_distance is not None:
-                    if direction_sign == 1:  # 张开 - 激光值越大表示越张开
-                        if real_distance > LASER_THRESHOLD_OPEN:  # 接近100mm极限
-                            if not slowdown_active:
-                                current_step = base_step * STEP_REDUCTION_FACTOR
-                                slowdown_active = True
-                                print(f"    ↓ 接近张开极限，步长减小至 {current_step:.6f} (激光: {real_distance:.1f}mm)")
-                        else:
-                            if slowdown_active:
-                                current_step = base_step
-                                slowdown_active = False
-                                print(f"    ↑ 恢复正常步长 {current_step:.6f}")
-                    else:  # 闭合 - 激光值越小表示越闭合
-                        if real_distance < LASER_THRESHOLD_CLOSE:  # 接近0mm极限
-                            if not slowdown_active:
-                                current_step = base_step * STEP_REDUCTION_FACTOR
-                                slowdown_active = True
-                                print(f"    ↓ 接近闭合极限，步长减小至 {current_step:.6f} (激光: {real_distance:.1f}mm)")
-                        else:
-                            if slowdown_active:
-                                current_step = base_step
-                                slowdown_active = False
-                                print(f"    ↑ 恢复正常步长 {current_step:.6f}")
-                
-                # 1. 更新指令位置
-                command_pos += current_step * direction_sign
-                
-                # 2. 发送位置指令
-                self.g.robot.set_actions({part: {"type": "position", "position": [command_pos]}})
-                
-                # 3. 等待一个周期
-                time.sleep(dt)
-                
-                # 4. 获取当前实际位置
-                current_actual_pos = self._get_feedback_scalar(pos_name)
-                if current_actual_pos is None:
-                    current_actual_pos = last_actual_pos
-                
-                # 5. 基于激光距离的停止检测
-                if not target_reached and real_distance is not None:
-                    if direction_sign == 1:  # 张开
-                        if real_distance >= LASER_STOP_OPEN:
-                            target_reached = True
-                            target_reached_time = time.time()
-                            print(f"\n    ✓ 到达张开目标位置 (激光: {real_distance:.1f}mm >= {LASER_STOP_OPEN}mm)")
-                            print(f"      当前位置: {current_actual_pos:.6f}")
-                            print(f"      开始稳定 {STABLE_TIME_AT_TARGET} 秒...")
-                    else:  # 闭合
-                        if real_distance <= LASER_STOP_CLOSE:
-                            target_reached = True
-                            target_reached_time = time.time()
-                            print(f"\n    ✓ 到达闭合目标位置 (激光: {real_distance:.1f}mm <= {LASER_STOP_CLOSE}mm)")
-                            print(f"      当前位置: {current_actual_pos:.6f}")
-                            print(f"      开始稳定 {STABLE_TIME_AT_TARGET} 秒...")
+                # 如果已经到达目标位置，不再下发任何指令，只等待稳定
+                if target_reached:
+                    # 只读取位置和激光数据，用于显示
+                    current_actual_pos = self._get_feedback_scalar(pos_name)
+                    if current_actual_pos is None:
+                        current_actual_pos = last_actual_pos
+                    real_distance = self._get_feedback_scalar("real_distance")
+                    time.sleep(dt)
+                else:
+                    # 获取激光测距仪数据（用于调整步长和停止判断）
+                    real_distance = self._get_feedback_scalar("real_distance")
+                    
+                    # 根据激光距离调整步长
+                    if real_distance is not None:
+                        if direction_sign == 1:  # 张开 - 激光值越大表示越张开
+                            if real_distance > LASER_THRESHOLD_OPEN:  # 接近100mm极限
+                                if not slowdown_active:
+                                    current_step = base_step * STEP_REDUCTION_FACTOR
+                                    slowdown_active = True
+                                    print(f"    ↓ 接近张开极限，步长减小至 {current_step:.6f} (激光: {real_distance:.1f}mm)")
+                            else:
+                                if slowdown_active:
+                                    current_step = base_step
+                                    slowdown_active = False
+                                    print(f"    ↑ 恢复正常步长 {current_step:.6f}")
+                        else:  # 闭合 - 激光值越小表示越闭合
+                            if real_distance < LASER_THRESHOLD_CLOSE:  # 接近0mm极限
+                                if not slowdown_active:
+                                    current_step = base_step * STEP_REDUCTION_FACTOR
+                                    slowdown_active = True
+                                    print(f"    ↓ 接近闭合极限，步长减小至 {current_step:.6f} (激光: {real_distance:.1f}mm)")
+                            else:
+                                if slowdown_active:
+                                    current_step = base_step
+                                    slowdown_active = False
+                                    print(f"    ↑ 恢复正常步长 {current_step:.6f}")
+                    
+                    # 1. 更新指令位置
+                    command_pos += current_step * direction_sign
+                    
+                    # 2. 发送位置指令
+                    self.g.robot.set_actions({part: {"type": "position", "position": [command_pos]}})
+                    
+                    # 3. 等待一个周期
+                    time.sleep(dt)
+                    
+                    # 4. 获取当前实际位置
+                    current_actual_pos = self._get_feedback_scalar(pos_name)
+                    if current_actual_pos is None:
+                        current_actual_pos = last_actual_pos
+                    
+                    # 5. 基于激光距离的停止检测
+                    if real_distance is not None:
+                        if direction_sign == 1:  # 张开
+                            if real_distance >= LASER_STOP_OPEN:
+                                target_reached = True
+                                target_reached_time = time.time()
+                                print(f"\n    ✓ 到达张开目标位置 (激光: {real_distance:.1f}mm >= {LASER_STOP_OPEN}mm)")
+                                print(f"      当前位置: {current_actual_pos:.6f}")
+                                print(f"      开始稳定 {STABLE_TIME_AT_TARGET} 秒...")
+                        else:  # 闭合
+                            if real_distance <= LASER_STOP_CLOSE:
+                                target_reached = True
+                                target_reached_time = time.time()
+                                print(f"\n    ✓ 到达闭合目标位置 (激光: {real_distance:.1f}mm <= {LASER_STOP_CLOSE}mm)")
+                                print(f"      当前位置: {current_actual_pos:.6f}")
+                                print(f"      开始稳定 {STABLE_TIME_AT_TARGET} 秒...")
                 
                 # 6. 实时显示（每0.5秒）
                 current_time = time.time()
