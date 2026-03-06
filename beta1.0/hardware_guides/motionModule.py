@@ -641,7 +641,11 @@ class MotionModule:
         # 基于激光距离的停止阈值
         LASER_STOP_OPEN = 95.0         # 张开时激光距离达到95mm停止
         LASER_STOP_CLOSE = 5.0         # 闭合时激光距离达到5mm停止
-        STABLE_TIME_AT_TARGET = 2.0    # 到达目标位置后稳定时间（秒）
+        
+        # 位置稳定检测参数
+        POS_STABLE_THRESHOLD = 0.0001  # 位置变化小于此值认为稳定
+        POS_STABLE_COUNT = 50          # 连续50次（0.5秒）稳定认为真正停止
+        MAX_WAIT_TIME = 5.0            # 最大等待时间5秒
         
         print(f"    起始位置: {start_pos:.6f}")
         print("    开始位置爬坡... (按Ctrl+C可中断)")
@@ -651,6 +655,8 @@ class MotionModule:
         slowdown_active = False
         target_reached = False
         target_reached_time = None
+        pos_stable_count = 0           # 位置稳定计数
+        last_stable_pos = None         # 上次检查的位置
         
         try:
             while True:
@@ -661,6 +667,19 @@ class MotionModule:
                     if current_actual_pos is None:
                         current_actual_pos = last_actual_pos
                     real_distance = self._get_feedback_scalar("real_distance")
+                    
+                    # 持续发送当前位置作为目标，确保电机停止运动
+                    self.g.robot.set_actions({part: {"type": "position", "position": [current_actual_pos]}})
+                    
+                    # 检查位置是否稳定
+                    if last_stable_pos is not None:
+                        pos_change = abs(current_actual_pos - last_stable_pos)
+                        if pos_change < POS_STABLE_THRESHOLD:
+                            pos_stable_count += 1
+                        else:
+                            pos_stable_count = 0
+                    last_stable_pos = current_actual_pos
+                    
                     time.sleep(dt)
                 else:
                     # 获取激光测距仪数据（用于调整步长和停止判断）
@@ -711,16 +730,18 @@ class MotionModule:
                             if real_distance >= LASER_STOP_OPEN:
                                 target_reached = True
                                 target_reached_time = time.time()
+                                last_stable_pos = current_actual_pos
                                 print(f"\n    ✓ 到达张开目标位置 (激光: {real_distance:.1f}mm >= {LASER_STOP_OPEN}mm)")
                                 print(f"      当前位置: {current_actual_pos:.6f}")
-                                print(f"      开始稳定 {STABLE_TIME_AT_TARGET} 秒...")
+                                print(f"      等待位置稳定 (变化<{POS_STABLE_THRESHOLD})...")
                         else:  # 闭合
                             if real_distance <= LASER_STOP_CLOSE:
                                 target_reached = True
                                 target_reached_time = time.time()
+                                last_stable_pos = current_actual_pos
                                 print(f"\n    ✓ 到达闭合目标位置 (激光: {real_distance:.1f}mm <= {LASER_STOP_CLOSE}mm)")
                                 print(f"      当前位置: {current_actual_pos:.6f}")
-                                print(f"      开始稳定 {STABLE_TIME_AT_TARGET} 秒...")
+                                print(f"      等待位置稳定 (变化<{POS_STABLE_THRESHOLD})...")
                 
                 # 6. 实时显示（每0.5秒）
                 current_time = time.time()
@@ -729,21 +750,29 @@ class MotionModule:
                     laser_str = f", 激光: {real_distance:.1f}mm" if real_distance is not None else ""
                     step_str = f", 步长: {current_step:.6f}" if slowdown_active else ""
                     if target_reached:
-                        remaining = STABLE_TIME_AT_TARGET - (current_time - target_reached_time)
-                        status_str = f", 稳定中... {remaining:.1f}s"
+                        stable_progress = f"{pos_stable_count}/{POS_STABLE_COUNT}"
+                        status_str = f", 稳定计数: {stable_progress}"
                     else:
                         status_str = f", 运动中"
                     print(f"    [{elapsed:5.1f}s] 位置: {current_actual_pos:8.6f}, "
                           f"指令: {command_pos:8.6f}{laser_str}{step_str}{status_str}")
                     last_print_time = current_time
                 
-                # 7. 检查是否稳定时间已到
+                # 7. 检查位置是否真正稳定或超时
                 if target_reached and target_reached_time is not None:
-                    if time.time() - target_reached_time >= STABLE_TIME_AT_TARGET:
-                        # 停止更新，保持在当前位置
-                        self.g.robot.set_actions({part: {"type": "position", "position": [current_actual_pos]}})
+                    # 检查位置是否稳定
+                    if pos_stable_count >= POS_STABLE_COUNT:
                         elapsed = time.time() - start_time
-                        print(f"\n    ✓ 标定完成！")
+                        print(f"\n    ✓ 标定完成！位置已稳定")
+                        print(f"      最终位置: {current_actual_pos:.6f}")
+                        print(f"      最终激光距离: {real_distance:.1f}mm" if real_distance is not None else "")
+                        print(f"      总耗时: {elapsed:.2f}秒")
+                        return current_actual_pos
+                    
+                    # 检查是否超时
+                    if time.time() - target_reached_time >= MAX_WAIT_TIME:
+                        elapsed = time.time() - start_time
+                        print(f"\n    ! 标定完成（等待超时）")
                         print(f"      最终位置: {current_actual_pos:.6f}")
                         print(f"      最终激光距离: {real_distance:.1f}mm" if real_distance is not None else "")
                         print(f"      总耗时: {elapsed:.2f}秒")
@@ -1045,14 +1074,24 @@ class MotionModule:
         print(f"      length_per_radian = {length_per_radian_10:.10f}")
         print(f"      min_pos = {min_pos:.6f}")
         
-        # ========== 步骤5: 在闭合位置设零 ==========
+        # ========== 步骤5: 移动到实际闭合位置并设零 ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤5: 在闭合位置设零")
+        print(">>> 步骤5: 移动到实际闭合位置并设零")
         print("=" * 60)
         
-        print(f"\n    当前位置应该是闭合位置 ({min_pos:.6f})")
-        print(f"    执行硬件设零...")
+        # 先移动到记录的 min_pos（实际闭合位置）
+        print(f"\n    移动到记录的闭合位置: {min_pos:.6f}")
+        try:
+            self._smooth_move_to(part, pos_name, min_pos, duration=2.0)
+            time.sleep(0.5)
+            print(f"    ✓ 已到达闭合位置")
+        except Exception as e:
+            print(f"    ✗ 移动失败: {e}")
+            self.g.loggerUI.error(f"移动到闭合位置失败: {e}")
+            input("按回车返回")
+            return
         
+        print(f"\n    执行硬件设零...")
         try:
             self.set_zero(part=part)
             print(f"    ✓ 设零完成！")
