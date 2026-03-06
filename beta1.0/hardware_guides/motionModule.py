@@ -599,9 +599,10 @@ class MotionModule:
     
     def _calibrate_gripper_climb(self, part: str, pos_name: str, direction_sign: int, 
                                   target_speed: float = 1.0, ctrl_freq: int = 100,
-                                  pos_threshold: float = 0.00001, stable_target: int = 15) -> float:
+                                  pos_threshold: float = 0.00001, stable_target: int = 15,
+                                  use_laser_stop: bool = True) -> float:
         """
-        通过位置爬坡模拟匀速运动进行标定（堵转检测）
+        通过位置爬坡模拟匀速运动进行标定
         在接近极限位置时自动减小步长以提高精度
         
         Args:
@@ -611,7 +612,8 @@ class MotionModule:
             target_speed: 目标速度 (单位/秒)
             ctrl_freq: 控制频率 (Hz)
             pos_threshold: 判断堵转的位置变化阈值
-            stable_target: 连续多少次位置不变认为堵转
+            stable_target: 连续多少次位置不变认为堵转（仅use_laser_stop=False时有效）
+            use_laser_stop: True=使用激光距离停止（95mm/5mm），False=使用堵转检测停止
             
         Returns:
             最终位置值
@@ -648,6 +650,7 @@ class MotionModule:
         MAX_WAIT_TIME = 5.0            # 最大等待时间5秒
         
         print(f"    起始位置: {start_pos:.6f}")
+        print(f"    停止模式: {'激光停止' if use_laser_stop else '堵转检测'}")
         print("    开始位置爬坡... (按Ctrl+C可中断)")
         
         last_print_time = time.time()
@@ -657,6 +660,9 @@ class MotionModule:
         target_reached_time = None
         pos_stable_count = 0           # 位置稳定计数
         last_stable_pos = None         # 上次检查的位置
+        
+        # 堵转检测计数（仅use_laser_stop=False时使用）
+        stall_count = 0
         
         try:
             while True:
@@ -682,10 +688,10 @@ class MotionModule:
                     
                     time.sleep(dt)
                 else:
-                    # 获取激光测距仪数据（用于调整步长和停止判断）
+                    # 获取激光测距仪数据（用于调整步长）
                     real_distance = self._get_feedback_scalar("real_distance")
                     
-                    # 根据激光距离调整步长
+                    # 根据激光距离调整步长（两种模式都使用）
                     if real_distance is not None:
                         if direction_sign == 1:  # 张开 - 激光值越大表示越张开
                             if real_distance > LASER_THRESHOLD_OPEN:  # 接近100mm极限
@@ -724,24 +730,43 @@ class MotionModule:
                     if current_actual_pos is None:
                         current_actual_pos = last_actual_pos
                     
-                    # 5. 基于激光距离的停止检测
-                    if real_distance is not None:
-                        if direction_sign == 1:  # 张开
-                            if real_distance >= LASER_STOP_OPEN:
+                    # 5. 停止检测
+                    if use_laser_stop:
+                        # 基于激光距离的停止检测（阶段1使用）
+                        if real_distance is not None:
+                            if direction_sign == 1:  # 张开
+                                if real_distance >= LASER_STOP_OPEN:
+                                    target_reached = True
+                                    target_reached_time = time.time()
+                                    last_stable_pos = current_actual_pos
+                                    print(f"\n    ✓ 到达张开目标位置 (激光: {real_distance:.1f}mm >= {LASER_STOP_OPEN}mm)")
+                                    print(f"      当前位置: {current_actual_pos:.6f}")
+                                    print(f"      等待位置稳定 (变化<{POS_STABLE_THRESHOLD})...")
+                            else:  # 闭合
+                                if real_distance <= LASER_STOP_CLOSE:
+                                    target_reached = True
+                                    target_reached_time = time.time()
+                                    last_stable_pos = current_actual_pos
+                                    print(f"\n    ✓ 到达闭合目标位置 (激光: {real_distance:.1f}mm <= {LASER_STOP_CLOSE}mm)")
+                                    print(f"      当前位置: {current_actual_pos:.6f}")
+                                    print(f"      等待位置稳定 (变化<{POS_STABLE_THRESHOLD})...")
+                    else:
+                        # 基于堵转检测的停止（阶段2使用）
+                        pos_change = abs(current_actual_pos - last_actual_pos)
+                        if pos_change < pos_threshold:
+                            stall_count += 1
+                            if stall_count >= stable_target:
                                 target_reached = True
                                 target_reached_time = time.time()
                                 last_stable_pos = current_actual_pos
-                                print(f"\n    ✓ 到达张开目标位置 (激光: {real_distance:.1f}mm >= {LASER_STOP_OPEN}mm)")
+                                print(f"\n    ✓ 检测到堵转，到达机械限位")
                                 print(f"      当前位置: {current_actual_pos:.6f}")
+                                print(f"      连续稳定次数: {stall_count}/{stable_target}")
                                 print(f"      等待位置稳定 (变化<{POS_STABLE_THRESHOLD})...")
-                        else:  # 闭合
-                            if real_distance <= LASER_STOP_CLOSE:
-                                target_reached = True
-                                target_reached_time = time.time()
-                                last_stable_pos = current_actual_pos
-                                print(f"\n    ✓ 到达闭合目标位置 (激光: {real_distance:.1f}mm <= {LASER_STOP_CLOSE}mm)")
-                                print(f"      当前位置: {current_actual_pos:.6f}")
-                                print(f"      等待位置稳定 (变化<{POS_STABLE_THRESHOLD})...")
+                        else:
+                            if stall_count > 0:
+                                print(f"    ↗ 位置变化恢复: {pos_change:.8f}, 重置堵转计数")
+                            stall_count = 0
                 
                 # 6. 实时显示（每0.5秒）
                 current_time = time.time()
@@ -752,8 +777,10 @@ class MotionModule:
                     if target_reached:
                         stable_progress = f"{pos_stable_count}/{POS_STABLE_COUNT}"
                         status_str = f", 稳定计数: {stable_progress}"
-                    else:
+                    elif use_laser_stop:
                         status_str = f", 运动中"
+                    else:
+                        status_str = f", 堵转计数: {stall_count}/{stable_target}"
                     print(f"    [{elapsed:5.1f}s] 位置: {current_actual_pos:8.6f}, "
                           f"指令: {command_pos:8.6f}{laser_str}{step_str}{status_str}")
                     last_print_time = current_time
@@ -1095,40 +1122,51 @@ class MotionModule:
         print(f"      length_per_radian = {length_per_radian_10:.10f}")
         print(f"      min_pos = {min_pos:.6f}")
         
-        # ========== 步骤5: 移动到实际闭合位置并设零 ==========
+        # ========== 步骤5: 移动到真正闭合位置（激光0±0.5mm） ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤5: 移动到实际闭合位置并设零")
+        print(">>> 步骤5: 移动到真正闭合位置（激光0±0.5mm）")
         print("=" * 60)
         
-        # 先移动到记录的 min_pos（实际闭合位置），使用激光检查确保到位
-        laser_close_target = state.get('laser_close_target', 5.0)
-        print(f"\n    移动到记录的闭合位置: {min_pos:.6f}")
-        print(f"    激光目标: {laser_close_target}mm (容差: ±2mm)")
+        # 从阶段1结束时的激光5mm位置，继续闭合到真正闭合位置（机械限位）
+        print(f"\n    当前在激光5mm位置，继续闭合到真正闭合位置（机械限位）...")
         try:
-            self._smooth_move_to(part, pos_name, min_pos, duration=2.0, 
-                                use_laser_check=True, laser_target=laser_close_target, laser_tolerance=2.0)
-            time.sleep(0.5)
-            print(f"    ✓ 已到达闭合位置")
+            # 使用爬坡方式闭合到机械限位（堵转检测）
+            true_close_pos = self._calibrate_gripper_climb(
+                part=part, 
+                pos_name=pos_name, 
+                direction_sign=-1,  # 闭合方向
+                target_speed=0.5,   # 较慢速度
+                ctrl_freq=100,
+                pos_threshold=0.00001,
+                stable_target=15,
+                use_laser_stop=False  # 使用堵转检测，不是激光停止
+            )
+            print(f"    ✓ 已到达真正闭合位置: {true_close_pos:.6f}")
         except Exception as e:
-            print(f"    ✗ 移动失败: {e}")
-            self.g.loggerUI.error(f"移动到闭合位置失败: {e}")
+            print(f"    ✗ 移动到真正闭合位置失败: {e}")
+            self.g.loggerUI.error(f"移动到真正闭合位置失败: {e}")
             input("按回车返回")
             return
+        
+        # ========== 步骤6: 在真正闭合位置设零 ==========
+        print("\n" + "=" * 60)
+        print(">>> 步骤6: 在真正闭合位置设零")
+        print("=" * 60)
         
         print(f"\n    执行硬件设零...")
         try:
             self.set_zero(part=part)
             print(f"    ✓ 设零完成！")
-            self.g.loggerUI.info(f"[设零完成] {part} 在闭合位置设零")
+            self.g.loggerUI.info(f"[设零完成] {part} 在真正闭合位置设零")
         except Exception as e:
             print(f"    ✗ 设零失败: {e}")
             self.g.loggerUI.error(f"设零失败: {e}")
             input("按回车返回")
             return
         
-        # ========== 步骤6: 移动到 0.025 位置 ==========
+        # ========== 步骤7: 移动到 0.025 位置 ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤6: 移动到 0.025 位置")
+        print(">>> 步骤7: 移动到 0.025 位置")
         print("=" * 60)
         
         target_pos = 0.025
@@ -1144,9 +1182,9 @@ class MotionModule:
             input("按回车返回")
             return
         
-        # ========== 步骤7: 再次设零 ==========
+        # ========== 步骤8: 再次设零 ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤7: 再次设零（在 0.025 位置）")
+        print(">>> 步骤8: 再次设零（在 0.025 位置）")
         print("=" * 60)
         
         try:
@@ -1160,9 +1198,9 @@ class MotionModule:
             input("按回车返回")
             return
         
-        # ========== 步骤8: 设置 offset_at_hardware_zero = 0.025 ==========
+        # ========== 步骤9: 设置 offset_at_hardware_zero = 0.025 ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤8: 设置 offset_at_hardware_zero = 0.025")
+        print(">>> 步骤9: 设置 offset_at_hardware_zero = 0.025")
         print("=" * 60)
         
         try:
