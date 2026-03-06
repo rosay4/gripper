@@ -636,7 +636,7 @@ class MotionModule:
         # 激光距离阈值（用于调整步长）- 注意：激光数据单位是mm
         LASER_THRESHOLD_OPEN = 90.0    # 张开时激光距离大于90mm时减速（接近100mm的极限）
         LASER_THRESHOLD_CLOSE = 5.0    # 闭合时激光距离小于5mm时减速（接近0mm的极限）
-        STEP_REDUCTION_FACTOR = 0.2    # 减速因子（步长变为原来的20%，更精细）
+        STEP_REDUCTION_FACTOR = 0.05    # 减速因子（步长变为原来的20%，更精细）
         
         print(f"    起始位置: {start_pos:.6f}")
         print("    开始位置爬坡... (按Ctrl+C可中断)")
