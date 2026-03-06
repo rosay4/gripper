@@ -1441,17 +1441,34 @@ class MotionModule:
             input("按回车返回")
             return
         
-        # ========== 步骤9: 设置 offset_at_hardware_zero = 0.025 ==========
+        # ========== 步骤9: 计算并设置 offset_at_hardware_zero ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤9: 设置 offset_at_hardware_zero = 0.025")
+        print(">>> 步骤9: 计算并设置 offset_at_hardware_zero")
         print("=" * 60)
+        
+        # 先读取当前激光距离
+        print("\n    读取当前激光距离...")
+        time.sleep(0.5)
+        current_laser = self._get_feedback_scalar("real_distance")
+        
+        if current_laser is None:
+            print(f"    ✗ 无法读取激光距离，标定失败")
+            self.g.loggerUI.error(f"无法读取激光距离")
+            input("按回车返回")
+            return
+        
+        # 计算 offset = 激光距离 / 2000
+        offset_value = current_laser / 2000.0
+        
+        print(f"\n    当前激光距离: {current_laser:.2f}mm")
+        print(f"    计算 offset = {current_laser:.2f} / 2000 = {offset_value:.6f}")
         
         try:
             yaml_path = self._write_gripper_yaml_params(
                 part=part,
-                offset_at_hardware_zero=0.025,
+                offset_at_hardware_zero=offset_value,
             )
-            print(f"    ✓ offset_at_hardware_zero 已设置为 0.025")
+            print(f"    ✓ offset_at_hardware_zero 已设置为 {offset_value:.6f}")
             print(f"      文件: {yaml_path}")
             
             # 同步到UI
@@ -1461,10 +1478,12 @@ class MotionModule:
             else:
                 print(f"    ! reload_robot_from_yaml() 未找到，请手动重启")
             
-            self.g.loggerUI.info(f"[参数更新] {part}: offset_at_hardware_zero=0.025")
+            self.g.loggerUI.info(f"[参数更新] {part}: offset_at_hardware_zero={offset_value:.6f}")
         except Exception as e:
             print(f"    ✗ 写入或同步失败: {e}")
             self.g.loggerUI.error(f"写入或同步失败: {e}")
+            input("按回车返回")
+            return
         
         # ========== 步骤10: 验证最终位置（激光距离应为50±0.2mm） ==========
         print("\n" + "=" * 60)
