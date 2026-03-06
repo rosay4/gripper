@@ -1294,21 +1294,21 @@ class MotionModule:
         print(f"      length_per_radian = {length_per_radian_10:.10f}")
         print(f"      min_pos = {min_pos:.6f}")
         
-        # ========== 步骤5: 移动到真正闭合位置（激光0±0.02mm） ==========
+        # ========== 步骤5: 移动到真正闭合位置（激光0±0.09mm） ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤5: 移动到真正闭合位置（激光0±0.02mm）")
+        print(">>> 步骤5: 移动到真正闭合位置（激光0±0.09mm）")
         print("=" * 60)
 
-        # 从阶段1结束时的激光5mm位置，继续闭合到真正闭合位置（激光0±0.02mm）
-        print(f"\n    当前在激光5mm位置，继续闭合到真正闭合位置（激光0±0.02mm）...")
+        # 从阶段1结束时的激光5mm位置，继续闭合到真正闭合位置（激光0±0.09mm）
+        print(f"\n    当前在激光5mm位置，继续闭合到真正闭合位置（激光0±0.09mm）...")
         try:
-            # 使用爬坡方式闭合到激光0±0.02mm
+            # 使用爬坡方式闭合到激光0±0.09mm
             true_close_pos = self._calibrate_gripper_climb_to_laser(
                 part=part,
                 pos_name=pos_name,
                 direction_sign=-1,  # 闭合方向
                 target_laser=0.0,   # 目标激光距离0mm
-                laser_tolerance=0.02, # 容差±0.02mm
+                laser_tolerance=0.09, # 容差±0.09mm
                 target_speed=0.3,   # 目标速度
                 ctrl_freq=100,
             )
