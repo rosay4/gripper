@@ -1412,16 +1412,12 @@ class MotionModule:
         
         target_pos = 0.025
         print(f"\n    目标位置: {target_pos:.6f}")
-        print(f"    使用阶跃控制（直接下发目标位置）...")
+        print(f"    使用平滑移动...")
         
         try:
-            # 使用 _run_point 进行阶跃控制，直接下发目标位置
-            self._run_point(
-                q_name=pos_name,
-                q_pos=[target_pos],
-                part=part,
-                timeout_s=3.0
-            )
+            # 使用 _smooth_move_to 进行平滑移动
+            self._smooth_move_to(part, pos_name, target_pos, duration=2.0)
+            time.sleep(0.5)
             print(f"    ✓ 已到达 0.025 位置")
         except Exception as e:
             print(f"    ✗ 移动失败: {e}")
