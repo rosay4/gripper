@@ -1313,7 +1313,7 @@ class MotionModule:
                 pos_name=pos_name,
                 direction_sign=-1,  # 闭合方向
                 target_laser=0.0,   # 目标激光距离0mm
-                laser_tolerance=0.2, # 容差±0.2mm
+                laser_tolerance=0.1, # 容差±0.2mm
                 target_speed=0.3,   # 基准速度（在length_per_radian=1.0时）
                 ctrl_freq=100,
                 length_per_radian=length_per_radian_10,  # 传入当前的length_per_radian
