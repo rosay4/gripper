@@ -788,7 +788,8 @@ class MotionModule:
                 self.g.robot.set_actions({part: {"type": "position", "position": [current_pos]}})
             raise
 
-    def _smooth_move_to(self, part: str, pos_name: str, target: float, duration: float = 2.0):
+    def _smooth_move_to(self, part: str, pos_name: str, target: float, duration: float = 2.0, 
+                         use_laser_check: bool = False, laser_target: float = None, laser_tolerance: float = 1.0):
         """
         平滑地将夹爪移动到目标位置
         
@@ -797,6 +798,9 @@ class MotionModule:
             pos_name: 位置反馈数据名
             target: 目标位置
             duration: 移动持续时间（秒）
+            use_laser_check: 是否使用激光距离作为到位判断
+            laser_target: 激光目标距离（mm）
+            laser_tolerance: 激光距离容差（mm）
         """
         steps = int(duration * 100)  # 100Hz
         dt = 0.01
@@ -818,17 +822,33 @@ class MotionModule:
         # 第二阶段：等待实际到达目标位置
         print("    等待到位...")
         wait_start = time.time()
-        max_wait = 3.0
+        max_wait = 5.0  # 增加最大等待时间到5秒
         
         while time.time() - wait_start < max_wait:
             current_pos = self._get_feedback_scalar(pos_name)
+            
+            # 如果使用激光检查
+            if use_laser_check and laser_target is not None:
+                real_distance = self._get_feedback_scalar("real_distance")
+                if real_distance is not None and abs(real_distance - laser_target) <= laser_tolerance:
+                    print(f"    ✓ 激光到位: {real_distance:.1f}mm (目标: {laser_target}mm)")
+                    return
+            
+            # 位置检查
             if current_pos is not None and abs(current_pos - target) <= 0.001:
                 print(f"    ✓ 移动到位: {current_pos:.6f}")
                 return
+                
             self.g.robot.set_actions({part: {"type": "position", "position": [target]}})
             time.sleep(dt)
         
+        # 超时后的最终状态
+        final_pos = self._get_feedback_scalar(pos_name)
+        final_laser = self._get_feedback_scalar("real_distance")
         print(f"    ! 等待到位超时")
+        print(f"      最终位置: {final_pos:.6f if final_pos else 'N/A'}")
+        if final_laser is not None:
+            print(f"      最终激光: {final_laser:.1f}mm")
 
     @hide_ui_while
     def full_auto_calibration(self, part: str, pos_name: str = "gripper_pos"):
@@ -1043,6 +1063,7 @@ class MotionModule:
             'laser_open': laser_open,
             'laser_close': laser_close,
             'length_per_radian': length_per_radian_10,
+            'laser_close_target': 5.0,  # 闭合时的激光目标距离
         }
         
         # ========== 阶段1完成，直接进入阶段2 ==========
@@ -1079,10 +1100,13 @@ class MotionModule:
         print(">>> 步骤5: 移动到实际闭合位置并设零")
         print("=" * 60)
         
-        # 先移动到记录的 min_pos（实际闭合位置）
+        # 先移动到记录的 min_pos（实际闭合位置），使用激光检查确保到位
+        laser_close_target = state.get('laser_close_target', 5.0)
         print(f"\n    移动到记录的闭合位置: {min_pos:.6f}")
+        print(f"    激光目标: {laser_close_target}mm (容差: ±2mm)")
         try:
-            self._smooth_move_to(part, pos_name, min_pos, duration=2.0)
+            self._smooth_move_to(part, pos_name, min_pos, duration=2.0, 
+                                use_laser_check=True, laser_target=laser_close_target, laser_tolerance=2.0)
             time.sleep(0.5)
             print(f"    ✓ 已到达闭合位置")
         except Exception as e:
