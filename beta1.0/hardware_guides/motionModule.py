@@ -636,7 +636,12 @@ class MotionModule:
         # 激光距离阈值（用于调整步长）- 注意：激光数据单位是mm
         LASER_THRESHOLD_OPEN = 90.0    # 张开时激光距离大于90mm时减速（接近100mm的极限）
         LASER_THRESHOLD_CLOSE = 5.0    # 闭合时激光距离小于5mm时减速（接近0mm的极限）
-        STEP_REDUCTION_FACTOR = 0.05    # 减速因子（步长变为原来的20%，更精细）
+        STEP_REDUCTION_FACTOR = 0.05   # 减速因子（步长变为原来的5%，更精细）
+        
+        # 基于激光距离的停止阈值
+        LASER_STOP_OPEN = 95.0         # 张开时激光距离达到95mm停止
+        LASER_STOP_CLOSE = 5.0         # 闭合时激光距离达到5mm停止
+        STABLE_TIME_AT_TARGET = 2.0    # 到达目标位置后稳定时间（秒）
         
         print(f"    起始位置: {start_pos:.6f}")
         print("    开始位置爬坡... (按Ctrl+C可中断)")
@@ -644,10 +649,12 @@ class MotionModule:
         last_print_time = time.time()
         start_time = time.time()
         slowdown_active = False
+        target_reached = False
+        target_reached_time = None
         
         try:
             while True:
-                # 获取激光测距仪数据（用于调整步长）
+                # 获取激光测距仪数据（用于调整步长和停止判断）
                 real_distance = self._get_feedback_scalar("real_distance")
                 
                 # 根据激光距离调整步长
@@ -689,11 +696,22 @@ class MotionModule:
                 if current_actual_pos is None:
                     current_actual_pos = last_actual_pos
                 
-                # 5. 堵转检测
-                if abs(current_actual_pos - last_actual_pos) < pos_threshold:
-                    stable_count += 1
-                else:
-                    stable_count = 0
+                # 5. 基于激光距离的停止检测
+                if not target_reached and real_distance is not None:
+                    if direction_sign == 1:  # 张开
+                        if real_distance >= LASER_STOP_OPEN:
+                            target_reached = True
+                            target_reached_time = time.time()
+                            print(f"\n    ✓ 到达张开目标位置 (激光: {real_distance:.1f}mm >= {LASER_STOP_OPEN}mm)")
+                            print(f"      当前位置: {current_actual_pos:.6f}")
+                            print(f"      开始稳定 {STABLE_TIME_AT_TARGET} 秒...")
+                    else:  # 闭合
+                        if real_distance <= LASER_STOP_CLOSE:
+                            target_reached = True
+                            target_reached_time = time.time()
+                            print(f"\n    ✓ 到达闭合目标位置 (激光: {real_distance:.1f}mm <= {LASER_STOP_CLOSE}mm)")
+                            print(f"      当前位置: {current_actual_pos:.6f}")
+                            print(f"      开始稳定 {STABLE_TIME_AT_TARGET} 秒...")
                 
                 # 6. 实时显示（每0.5秒）
                 current_time = time.time()
@@ -701,19 +719,26 @@ class MotionModule:
                     elapsed = current_time - start_time
                     laser_str = f", 激光: {real_distance:.1f}mm" if real_distance is not None else ""
                     step_str = f", 步长: {current_step:.6f}" if slowdown_active else ""
+                    if target_reached:
+                        remaining = STABLE_TIME_AT_TARGET - (current_time - target_reached_time)
+                        status_str = f", 稳定中... {remaining:.1f}s"
+                    else:
+                        status_str = f", 运动中"
                     print(f"    [{elapsed:5.1f}s] 位置: {current_actual_pos:8.6f}, "
-                          f"指令: {command_pos:8.6f}, 稳定计数: {stable_count:2d}/{stable_target}{laser_str}{step_str}")
+                          f"指令: {command_pos:8.6f}{laser_str}{step_str}{status_str}")
                     last_print_time = current_time
                 
-                # 7. 检测到堵转
-                if stable_count >= stable_target:
-                    # 停止更新，保持在当前位置
-                    self.g.robot.set_actions({part: {"type": "position", "position": [current_actual_pos]}})
-                    elapsed = time.time() - start_time
-                    print(f"\n    ✓ 检测到机械限位！")
-                    print(f"      最终位置: {current_actual_pos:.6f}")
-                    print(f"      总耗时: {elapsed:.2f}秒")
-                    return current_actual_pos
+                # 7. 检查是否稳定时间已到
+                if target_reached and target_reached_time is not None:
+                    if time.time() - target_reached_time >= STABLE_TIME_AT_TARGET:
+                        # 停止更新，保持在当前位置
+                        self.g.robot.set_actions({part: {"type": "position", "position": [current_actual_pos]}})
+                        elapsed = time.time() - start_time
+                        print(f"\n    ✓ 标定完成！")
+                        print(f"      最终位置: {current_actual_pos:.6f}")
+                        print(f"      最终激光距离: {real_distance:.1f}mm" if real_distance is not None else "")
+                        print(f"      总耗时: {elapsed:.2f}秒")
+                        return current_actual_pos
                 
                 last_actual_pos = current_actual_pos
                 
@@ -972,7 +997,7 @@ class MotionModule:
             input("按回车返回")
             return
         
-        # 保存状态，等待阶段2
+        # 保存状态，直接进入阶段2
         self._calibration_state = {
             'part': part,
             'min_pos': min_pos,
@@ -982,18 +1007,17 @@ class MotionModule:
             'length_per_radian': length_per_radian_10,
         }
         
-        # ========== 阶段1完成 ==========
+        # ========== 阶段1完成，直接进入阶段2 ==========
         print("\n" + "=" * 60)
-        print("【阶段1完成】参数已计算并写入")
+        print("【阶段1完成】参数已计算并写入，即将进入阶段2")
         print("=" * 60)
-        print(f"\n    已保存的标定数据:")
+        print(f"\n    标定数据:")
         print(f"      length_per_radian = {length_per_radian_10:.10f}")
         print(f"      min_pos = {min_pos:.6f}")
         print(f"      max_pos = {max_pos:.6f}")
-        print(f"\n    ⚠️  请返回主界面确认参数是否正确")
-        print(f"    确认无误后，重新进入本菜单继续阶段2（设零流程）")
         
-        input("\n按回车返回主界面")
+        # 直接进入阶段2
+        return self._full_auto_calibration_phase2(part, pos_name)
 
 
     def _full_auto_calibration_phase2(self, part: str, pos_name: str = "gripper_pos"):
@@ -1004,20 +1028,13 @@ class MotionModule:
         min_pos = state['min_pos']
         length_per_radian_10 = state['length_per_radian']
         
-        print("=" * 60)
+        print("\n" + "=" * 60)
         print("【参考已有完整流程】自动标定并设零（阶段2: 完成设零）")
         print("=" * 60)
         print(f"夹爪: {part}")
         print(f"\n    恢复的标定数据:")
         print(f"      length_per_radian = {length_per_radian_10:.10f}")
         print(f"      min_pos = {min_pos:.6f}")
-        
-        # 确认继续
-        confirm = input("\n是否继续完成设零流程? (y/n): ").strip().lower()
-        if confirm != 'y':
-            print("已取消")
-            input("按回车返回")
-            return
         
         # ========== 步骤5: 在闭合位置设零 ==========
         print("\n" + "=" * 60)
