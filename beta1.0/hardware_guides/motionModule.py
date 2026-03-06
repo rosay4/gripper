@@ -879,7 +879,7 @@ class MotionModule:
                     real_distance = self._get_feedback_scalar("real_distance")
                     
                     # 发送零速度指令，确保电机停止
-                    self.g.robot.set_actions({part: {"type": "speed", "speed": [0.0]}})
+                    self.g.robot.set_actions({part: {"type": "velocity", "velocity": [0.0]}})
                     
                     # 检查位置是否稳定
                     if last_stable_pos is not None:
@@ -910,7 +910,7 @@ class MotionModule:
                                 print(f"    ↑ 恢复正常速度 {current_speed:.3f}")
                     
                     # 1. 发送速度指令（使用速度控制而非位置控制）
-                    self.g.robot.set_actions({part: {"type": "speed", "speed": [current_speed * direction_sign]}})
+                    self.g.robot.set_actions({part: {"type": "velocity", "velocity": [current_speed * direction_sign]}})
                     
                     # 2. 等待一个周期
                     time.sleep(dt)
@@ -954,7 +954,7 @@ class MotionModule:
                         print(f"      最终激光距离: {real_distance:.2f}mm" if real_distance is not None else "")
                         print(f"      总耗时: {elapsed:.2f}秒")
                         # 停止运动
-                        self.g.robot.set_actions({part: {"type": "speed", "speed": [0.0]}})
+                        self.g.robot.set_actions({part: {"type": "velocity", "velocity": [0.0]}})
                         return current_actual_pos
                     
                     # 检查是否超时
@@ -965,7 +965,7 @@ class MotionModule:
                         print(f"      最终激光距离: {real_distance:.2f}mm" if real_distance is not None else "")
                         print(f"      总耗时: {elapsed:.2f}秒")
                         # 停止运动
-                        self.g.robot.set_actions({part: {"type": "speed", "speed": [0.0]}})
+                        self.g.robot.set_actions({part: {"type": "velocity", "velocity": [0.0]}})
                         return current_actual_pos
                 
                 last_actual_pos = current_actual_pos
@@ -973,7 +973,7 @@ class MotionModule:
         except KeyboardInterrupt:
             print("\n    ! 用户中断移动")
             # 停止运动
-            self.g.robot.set_actions({part: {"type": "speed", "speed": [0.0]}})
+            self.g.robot.set_actions({part: {"type": "velocity", "velocity": [0.0]}})
             raise
 
     def _smooth_move_to(self, part: str, pos_name: str, target: float, duration: float = 2.0, 
