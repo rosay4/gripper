@@ -817,9 +817,13 @@ class MotionModule:
 
     def _calibrate_gripper_climb_to_laser(self, part: str, pos_name: str, direction_sign: int,
                                            target_laser: float, laser_tolerance: float = 0.2,
-                                           target_speed: float = 0.3, ctrl_freq: int = 100) -> float:
+                                           target_speed: float = 0.3, ctrl_freq: int = 100,
+                                           use_jam_detection: bool = False,
+                                           jam_threshold: float = 0.0001,
+                                           jam_count: int = 50) -> float:
         """
         通过位置爬坡移动到指定的激光距离目标（阶段2专用）
+        支持两种停止模式：激光检测或堵转检测
         
         Args:
             part: 夹爪部件名
@@ -829,6 +833,9 @@ class MotionModule:
             laser_tolerance: 激光距离容差（mm），默认±0.2mm
             target_speed: 目标速度 (单位/秒)，默认0.3
             ctrl_freq: 控制频率 (Hz)
+            use_jam_detection: True=使用堵转检测停止, False=使用激光检测停止
+            jam_threshold: 堵转检测阈值（位置变化小于此值认为堵转）
+            jam_count: 连续多少次位置不变认为堵转
             
         Returns:
             最终位置值
@@ -838,7 +845,10 @@ class MotionModule:
         current_step = base_step
         
         direction_str = "闭合" if direction_sign == -1 else "张开"
-        print(f"\n>>> 开始移动{direction_str}到激光目标: {target_laser}mm (容差: ±{laser_tolerance}mm)")
+        stop_mode_str = "堵转检测" if use_jam_detection else "激光检测"
+        print(f"\n>>> 开始移动{direction_str}到目标 (停止模式: {stop_mode_str})")
+        if not use_jam_detection:
+            print(f"    激光目标: {target_laser}mm (容差: ±{laser_tolerance}mm)")
         print(f"    控制频率: {ctrl_freq}Hz, 目标速度: {target_speed}")
         print(f"    基础步长: {base_step:.6f}")
         
@@ -849,7 +859,7 @@ class MotionModule:
         command_pos = start_pos
         last_actual_pos = start_pos
         
-        # 减速阈值（接近目标时减速）
+        # 减速阈值（接近目标时减速）- 仅激光模式使用
         SLOWDOWN_DISTANCE = 2.0  # 距离目标2mm时开始减速
         STEP_REDUCTION_FACTOR = 0.1  # 减速因子
         
@@ -857,6 +867,9 @@ class MotionModule:
         POS_STABLE_THRESHOLD = 0.0001  # 位置变化小于此值认为稳定
         POS_STABLE_COUNT = 50          # 连续50次（0.5秒）稳定认为真正停止
         MAX_WAIT_TIME = 5.0            # 最大等待时间5秒
+        
+        # 堵转检测参数
+        jam_stable_count = 0  # 堵转计数器
         
         print(f"    起始位置: {start_pos:.6f}")
         print("    开始位置爬坡... (按Ctrl+C可中断)")
@@ -893,11 +906,11 @@ class MotionModule:
                     
                     time.sleep(dt)
                 else:
-                    # 获取激光测距仪数据
+                    # 获取激光测距仪数据（用于显示和减速）
                     real_distance = self._get_feedback_scalar("real_distance")
                     
-                    # 根据距离目标的远近调整步长
-                    if real_distance is not None:
+                    # 根据距离目标的远近调整步长（仅激光模式）
+                    if not use_jam_detection and real_distance is not None:
                         distance_to_target = abs(real_distance - target_laser)
                         if distance_to_target < SLOWDOWN_DISTANCE:  # 接近目标
                             if not slowdown_active:
@@ -924,15 +937,33 @@ class MotionModule:
                     if current_actual_pos is None:
                         current_actual_pos = last_actual_pos
                     
-                    # 5. 基于激光距离的停止检测
-                    if real_distance is not None:
-                        if abs(real_distance - target_laser) <= laser_tolerance:
-                            target_reached = True
-                            target_reached_time = time.time()
-                            last_stable_pos = current_actual_pos
-                            print(f"\n    ✓ 到达激光目标位置 (激光: {real_distance:.2f}mm, 目标: {target_laser}mm ±{laser_tolerance}mm)")
-                            print(f"      当前位置: {current_actual_pos:.6f}")
-                            print(f"      等待位置稳定 (变化<{POS_STABLE_THRESHOLD})...")
+                    # 5. 停止检测
+                    if use_jam_detection:
+                        # 基于堵转的停止检测
+                        pos_change = abs(current_actual_pos - last_actual_pos)
+                        if pos_change < jam_threshold:
+                            jam_stable_count += 1
+                            if jam_stable_count >= jam_count:
+                                target_reached = True
+                                target_reached_time = time.time()
+                                last_stable_pos = current_actual_pos
+                                print(f"\n    ✓ 检测到堵转 (连续{jam_count}次位置变化<{jam_threshold})")
+                                print(f"      当前位置: {current_actual_pos:.6f}")
+                                if real_distance is not None:
+                                    print(f"      当前激光: {real_distance:.2f}mm")
+                                print(f"      等待位置稳定...")
+                        else:
+                            jam_stable_count = 0
+                    else:
+                        # 基于激光距离的停止检测
+                        if real_distance is not None:
+                            if abs(real_distance - target_laser) <= laser_tolerance:
+                                target_reached = True
+                                target_reached_time = time.time()
+                                last_stable_pos = current_actual_pos
+                                print(f"\n    ✓ 到达激光目标位置 (激光: {real_distance:.2f}mm, 目标: {target_laser}mm ±{laser_tolerance}mm)")
+                                print(f"      当前位置: {current_actual_pos:.6f}")
+                                print(f"      等待位置稳定...")
                 
                 # 6. 实时显示（每0.5秒）
                 current_time = time.time()
@@ -940,13 +971,17 @@ class MotionModule:
                     elapsed = current_time - start_time
                     laser_str = f", 激光: {real_distance:.2f}mm" if real_distance is not None else ""
                     step_str = f", 步长: {current_step:.6f}" if slowdown_active else ""
+                    if use_jam_detection and not target_reached:
+                        jam_str = f", 堵转计数: {jam_stable_count}/{jam_count}"
+                    else:
+                        jam_str = ""
                     if target_reached:
                         stable_progress = f"{pos_stable_count}/{POS_STABLE_COUNT}"
                         status_str = f", 稳定计数: {stable_progress}"
                     else:
                         status_str = f", 运动中"
                     print(f"    [{elapsed:5.1f}s] 位置: {current_actual_pos:8.6f}, "
-                          f"指令: {command_pos:8.6f}{laser_str}{step_str}{status_str}")
+                          f"指令: {command_pos:8.6f}{laser_str}{step_str}{jam_str}{status_str}")
                     last_print_time = current_time
                 
                 # 7. 检查位置是否真正稳定或超时
@@ -1326,23 +1361,26 @@ class MotionModule:
         print(f"\n    注意: 由于length_per_radian改变，位置数值已变化")
         print(f"          阶段1的min_pos({min_pos:.6f})已不再适用")
         
-        # ========== 步骤5: 移动到真正闭合位置（激光0±0.2mm） ==========
+        # ========== 步骤5: 移动到真正闭合位置（使用堵转检测） ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤5: 移动到真正闭合位置（激光0±0.2mm）")
+        print(">>> 步骤5: 移动到真正闭合位置（使用堵转检测）")
         print("=" * 60)
         
-        # 从当前实际位置开始，闭合到真正闭合位置（激光0±0.2mm）
-        print(f"\n    从当前位置继续闭合到真正闭合位置（激光0±0.2mm）...")
+        # 从当前实际位置开始，闭合直到堵转（机械闭合）
+        print(f"\n    从当前位置继续闭合直到机械堵转...")
         try:
-            # 使用爬坡方式闭合到激光0±0.2mm
+            # 使用爬坡方式闭合，通过堵转检测判断是否到达真正闭合位置
             true_close_pos = self._calibrate_gripper_climb_to_laser(
                 part=part,
                 pos_name=pos_name,
                 direction_sign=-1,  # 闭合方向
-                target_laser=0.0,   # 目标激光距离0mm
-                laser_tolerance=0.2, # 容差±0.2mm
+                target_laser=0.0,   # 激光目标（仅用于显示）
+                laser_tolerance=0.2, # 激光容差（仅用于显示）
                 target_speed=0.3,   # 目标速度
                 ctrl_freq=100,
+                use_jam_detection=True,  # 使用堵转检测
+                jam_threshold=0.0001,    # 堵转阈值
+                jam_count=50,            # 连续50次（0.5秒）位置不变认为堵转
             )
             print(f"    ✓ 已到达真正闭合位置: {true_close_pos:.6f}")
         except Exception as e:
