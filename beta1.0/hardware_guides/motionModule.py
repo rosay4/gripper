@@ -1045,7 +1045,8 @@ class MotionModule:
         final_pos = self._get_feedback_scalar(pos_name)
         final_laser = self._get_feedback_scalar("real_distance")
         print(f"    ! 等待到位超时")
-        print(f"      最终位置: {final_pos:.6f if final_pos else 'N/A'}")
+        final_pos_str = f"{final_pos:.6f}" if final_pos is not None else "N/A"
+        print(f"      最终位置: {final_pos_str}")
         if final_laser is not None:
             print(f"      最终激光: {final_laser:.1f}mm")
 
