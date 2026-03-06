@@ -817,11 +817,9 @@ class MotionModule:
 
     def _calibrate_gripper_climb_to_laser(self, part: str, pos_name: str, direction_sign: int,
                                            target_laser: float, laser_tolerance: float = 0.2,
-                                           target_speed: float = 0.5, ctrl_freq: int = 100,
-                                           length_per_radian: float = None) -> float:
+                                           target_speed: float = 0.3, ctrl_freq: int = 100) -> float:
         """
         通过位置爬坡移动到指定的激光距离目标（阶段2专用）
-        根据length_per_radian自动调整步长
         
         Args:
             part: 夹爪部件名
@@ -829,30 +827,19 @@ class MotionModule:
             direction_sign: -1 (向内闭合), 1 (向外打开)
             target_laser: 目标激光距离（mm）
             laser_tolerance: 激光距离容差（mm），默认±0.2mm
-            target_speed: 目标速度 (单位/秒)，在length_per_radian=1.0时的基准速度
+            target_speed: 目标速度 (单位/秒)，默认0.3
             ctrl_freq: 控制频率 (Hz)
-            length_per_radian: 当前的length_per_radian值，用于调整步长
             
         Returns:
             最终位置值
         """
         dt = 1.0 / ctrl_freq
-        
-        # 根据length_per_radian调整步长
-        # 如果length_per_radian较小（如0.0099），步长也会相应减小（保持与阶段1相同的机械运动效果）
-        if length_per_radian is not None and length_per_radian > 0:
-            adjusted_speed = target_speed * length_per_radian
-        else:
-            adjusted_speed = target_speed
-        
-        base_step = adjusted_speed * dt
+        base_step = target_speed * dt
         current_step = base_step
         
         direction_str = "闭合" if direction_sign == -1 else "张开"
         print(f"\n>>> 开始移动{direction_str}到激光目标: {target_laser}mm (容差: ±{laser_tolerance}mm)")
-        print(f"    控制频率: {ctrl_freq}Hz")
-        print(f"    基准速度: {target_speed}, 调整后速度: {adjusted_speed:.3f}")
-        print(f"    length_per_radian: {length_per_radian}")
+        print(f"    控制频率: {ctrl_freq}Hz, 目标速度: {target_speed}")
         print(f"    基础步长: {base_step:.6f}")
         
         # 获取起始位置
@@ -1050,7 +1037,7 @@ class MotionModule:
         final_pos = self._get_feedback_scalar(pos_name)
         final_laser = self._get_feedback_scalar("real_distance")
         print(f"    ! 等待到位超时")
-        print(f"      最终位置: {final_pos:.6f if final_pos else 'N/A'}")
+        print(f"      最终位置: {final_pos:.6f}" if final_pos is not None else "      最终位置: N/A")
         if final_laser is not None:
             print(f"      最终激光: {final_laser:.1f}mm")
 
@@ -1307,16 +1294,15 @@ class MotionModule:
         # 从阶段1结束时的激光5mm位置，继续闭合到真正闭合位置（激光0±0.2mm）
         print(f"\n    当前在激光5mm位置，继续闭合到真正闭合位置（激光0±0.2mm）...")
         try:
-            # 使用爬坡方式闭合到激光0±0.2mm，传入length_per_radian以调整步长
+            # 使用爬坡方式闭合到激光0±0.2mm
             true_close_pos = self._calibrate_gripper_climb_to_laser(
                 part=part,
                 pos_name=pos_name,
                 direction_sign=-1,  # 闭合方向
                 target_laser=0.0,   # 目标激光距离0mm
-                laser_tolerance=0.1, # 容差±0.2mm
-                target_speed=0.3,   # 基准速度（在length_per_radian=1.0时）
+                laser_tolerance=0.2, # 容差±0.2mm
+                target_speed=0.3,   # 目标速度
                 ctrl_freq=100,
-                length_per_radian=length_per_radian_10,  # 传入当前的length_per_radian
             )
             print(f"    ✓ 已到达真正闭合位置: {true_close_pos:.6f}")
         except Exception as e:
