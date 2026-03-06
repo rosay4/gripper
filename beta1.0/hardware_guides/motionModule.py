@@ -819,7 +819,8 @@ class MotionModule:
                                            target_laser: float, laser_tolerance: float = 0.2,
                                            target_speed: float = 0.5, ctrl_freq: int = 100) -> float:
         """
-        通过位置爬坡移动到指定的激光距离目标
+        通过速度控制移动到指定的激光距离目标（阶段2专用）
+        使用速度控制而非位置控制，避免length_per_radian变化导致的位置数值问题
         
         Args:
             part: 夹爪部件名
@@ -834,23 +835,21 @@ class MotionModule:
             最终位置值
         """
         dt = 1.0 / ctrl_freq
-        base_step = target_speed * dt
-        current_step = base_step
         
         direction_str = "闭合" if direction_sign == -1 else "张开"
         print(f"\n>>> 开始移动{direction_str}到激光目标: {target_laser}mm (容差: ±{laser_tolerance}mm)")
-        print(f"    控制频率: {ctrl_freq}Hz, 基础步长: {base_step:.6f}")
+        print(f"    控制频率: {ctrl_freq}Hz, 目标速度: {target_speed}")
+        print(f"    使用速度控制模式（避免位置数值问题）")
         
         # 获取起始位置
         start_pos = self._get_feedback_scalar(pos_name)
         if start_pos is None:
             start_pos = 0.0
-        command_pos = start_pos
         last_actual_pos = start_pos
         
         # 减速阈值（接近目标时减速）
         SLOWDOWN_DISTANCE = 2.0  # 距离目标2mm时开始减速
-        STEP_REDUCTION_FACTOR = 0.1  # 减速因子
+        SPEED_REDUCTION_FACTOR = 0.1  # 减速因子
         
         # 位置稳定检测参数
         POS_STABLE_THRESHOLD = 0.0001  # 位置变化小于此值认为稳定
@@ -858,7 +857,7 @@ class MotionModule:
         MAX_WAIT_TIME = 5.0            # 最大等待时间5秒
         
         print(f"    起始位置: {start_pos:.6f}")
-        print("    开始位置爬坡... (按Ctrl+C可中断)")
+        print("    开始速度控制移动... (按Ctrl+C可中断)")
         
         last_print_time = time.time()
         start_time = time.time()
@@ -867,10 +866,11 @@ class MotionModule:
         target_reached_time = None
         pos_stable_count = 0
         last_stable_pos = None
+        current_speed = target_speed
         
         try:
             while True:
-                # 如果已经到达目标位置，不再下发任何指令，只等待稳定
+                # 如果已经到达目标位置，停止运动并等待稳定
                 if target_reached:
                     # 只读取位置和激光数据，用于显示
                     current_actual_pos = self._get_feedback_scalar(pos_name)
@@ -878,8 +878,8 @@ class MotionModule:
                         current_actual_pos = last_actual_pos
                     real_distance = self._get_feedback_scalar("real_distance")
                     
-                    # 持续发送当前位置作为目标，确保电机停止运动
-                    self.g.robot.set_actions({part: {"type": "position", "position": [current_actual_pos]}})
+                    # 发送零速度指令，确保电机停止
+                    self.g.robot.set_actions({part: {"type": "speed", "speed": [0.0]}})
                     
                     # 检查位置是否稳定
                     if last_stable_pos is not None:
@@ -895,35 +895,32 @@ class MotionModule:
                     # 获取激光测距仪数据
                     real_distance = self._get_feedback_scalar("real_distance")
                     
-                    # 根据距离目标的远近调整步长
+                    # 根据距离目标的远近调整速度
                     if real_distance is not None:
                         distance_to_target = abs(real_distance - target_laser)
                         if distance_to_target < SLOWDOWN_DISTANCE:  # 接近目标
                             if not slowdown_active:
-                                current_step = base_step * STEP_REDUCTION_FACTOR
+                                current_speed = target_speed * SPEED_REDUCTION_FACTOR
                                 slowdown_active = True
-                                print(f"    ↓ 接近目标，步长减小至 {current_step:.6f} (距离: {distance_to_target:.2f}mm)")
+                                print(f"    ↓ 接近目标，速度减小至 {current_speed:.3f} (距离: {distance_to_target:.2f}mm)")
                         else:
                             if slowdown_active:
-                                current_step = base_step
+                                current_speed = target_speed
                                 slowdown_active = False
-                                print(f"    ↑ 恢复正常步长 {current_step:.6f}")
+                                print(f"    ↑ 恢复正常速度 {current_speed:.3f}")
                     
-                    # 1. 更新指令位置
-                    command_pos += current_step * direction_sign
+                    # 1. 发送速度指令（使用速度控制而非位置控制）
+                    self.g.robot.set_actions({part: {"type": "speed", "speed": [current_speed * direction_sign]}})
                     
-                    # 2. 发送位置指令
-                    self.g.robot.set_actions({part: {"type": "position", "position": [command_pos]}})
-                    
-                    # 3. 等待一个周期
+                    # 2. 等待一个周期
                     time.sleep(dt)
                     
-                    # 4. 获取当前实际位置
+                    # 3. 获取当前实际位置
                     current_actual_pos = self._get_feedback_scalar(pos_name)
                     if current_actual_pos is None:
                         current_actual_pos = last_actual_pos
                     
-                    # 5. 基于激光距离的停止检测
+                    # 4. 基于激光距离的停止检测
                     if real_distance is not None:
                         if abs(real_distance - target_laser) <= laser_tolerance:
                             target_reached = True
@@ -933,22 +930,21 @@ class MotionModule:
                             print(f"      当前位置: {current_actual_pos:.6f}")
                             print(f"      等待位置稳定 (变化<{POS_STABLE_THRESHOLD})...")
                 
-                # 6. 实时显示（每0.5秒）
+                # 5. 实时显示（每0.5秒）
                 current_time = time.time()
                 if current_time - last_print_time >= 0.5:
                     elapsed = current_time - start_time
                     laser_str = f", 激光: {real_distance:.2f}mm" if real_distance is not None else ""
-                    step_str = f", 步长: {current_step:.6f}" if slowdown_active else ""
+                    speed_str = f", 速度: {current_speed:.3f}" if slowdown_active else ""
                     if target_reached:
                         stable_progress = f"{pos_stable_count}/{POS_STABLE_COUNT}"
                         status_str = f", 稳定计数: {stable_progress}"
                     else:
                         status_str = f", 运动中"
-                    print(f"    [{elapsed:5.1f}s] 位置: {current_actual_pos:8.6f}, "
-                          f"指令: {command_pos:8.6f}{laser_str}{step_str}{status_str}")
+                    print(f"    [{elapsed:5.1f}s] 位置: {current_actual_pos:8.6f}{laser_str}{speed_str}{status_str}")
                     last_print_time = current_time
                 
-                # 7. 检查位置是否真正稳定或超时
+                # 6. 检查位置是否真正稳定或超时
                 if target_reached and target_reached_time is not None:
                     # 检查位置是否稳定
                     if pos_stable_count >= POS_STABLE_COUNT:
@@ -957,6 +953,8 @@ class MotionModule:
                         print(f"      最终位置: {current_actual_pos:.6f}")
                         print(f"      最终激光距离: {real_distance:.2f}mm" if real_distance is not None else "")
                         print(f"      总耗时: {elapsed:.2f}秒")
+                        # 停止运动
+                        self.g.robot.set_actions({part: {"type": "speed", "speed": [0.0]}})
                         return current_actual_pos
                     
                     # 检查是否超时
@@ -966,6 +964,8 @@ class MotionModule:
                         print(f"      最终位置: {current_actual_pos:.6f}")
                         print(f"      最终激光距离: {real_distance:.2f}mm" if real_distance is not None else "")
                         print(f"      总耗时: {elapsed:.2f}秒")
+                        # 停止运动
+                        self.g.robot.set_actions({part: {"type": "speed", "speed": [0.0]}})
                         return current_actual_pos
                 
                 last_actual_pos = current_actual_pos
@@ -973,9 +973,7 @@ class MotionModule:
         except KeyboardInterrupt:
             print("\n    ! 用户中断移动")
             # 停止运动
-            current_pos = self._get_feedback_scalar(pos_name)
-            if current_pos is not None:
-                self.g.robot.set_actions({part: {"type": "position", "position": [current_pos]}})
+            self.g.robot.set_actions({part: {"type": "speed", "speed": [0.0]}})
             raise
 
     def _smooth_move_to(self, part: str, pos_name: str, target: float, duration: float = 2.0, 
