@@ -839,9 +839,9 @@ class MotionModule:
         dt = 1.0 / ctrl_freq
         
         # 根据length_per_radian调整步长
-        # 如果length_per_radian较小（如0.0099），需要增大步长以保持相同的机械运动速度
+        # 如果length_per_radian较小（如0.0099），步长也会相应减小（保持与阶段1相同的机械运动效果）
         if length_per_radian is not None and length_per_radian > 0:
-            adjusted_speed = target_speed / length_per_radian
+            adjusted_speed = target_speed * length_per_radian
         else:
             adjusted_speed = target_speed
         
@@ -1399,6 +1399,36 @@ class MotionModule:
         except Exception as e:
             print(f"    ✗ 写入或同步失败: {e}")
             self.g.loggerUI.error(f"写入或同步失败: {e}")
+        
+        # ========== 步骤10: 验证最终位置（激光距离应为50±0.2mm） ==========
+        print("\n" + "=" * 60)
+        print(">>> 步骤10: 验证最终位置")
+        print("=" * 60)
+        
+        # 等待一段时间让系统稳定
+        print("\n    等待系统稳定...")
+        time.sleep(1.0)
+        
+        # 读取当前激光距离
+        final_laser = self._get_feedback_scalar("real_distance")
+        if final_laser is not None:
+            TARGET_LASER = 50.0  # 目标激光距离50mm
+            LASER_TOLERANCE = 0.2  # 容差±0.2mm
+            
+            print(f"\n    当前激光距离: {final_laser:.2f}mm")
+            print(f"    目标范围: {TARGET_LASER}±{LASER_TOLERANCE}mm ({TARGET_LASER - LASER_TOLERANCE} ~ {TARGET_LASER + LASER_TOLERANCE}mm)")
+            
+            if abs(final_laser - TARGET_LASER) <= LASER_TOLERANCE:
+                print(f"    ✓ 验证通过！激光距离在合格范围内")
+                self.g.loggerUI.info(f"[验证通过] {part} 最终激光距离: {final_laser:.2f}mm (目标: {TARGET_LASER}±{LASER_TOLERANCE}mm)")
+            else:
+                print(f"    ✗ 验证失败！激光距离超出合格范围")
+                print(f"      偏差: {final_laser - TARGET_LASER:.2f}mm")
+                self.g.loggerUI.error(f"[验证失败] {part} 最终激光距离: {final_laser:.2f}mm，超出目标范围 {TARGET_LASER}±{LASER_TOLERANCE}mm")
+                print(f"\n    ! 警告: 标定结果可能不合格，请检查机械结构或重新标定")
+        else:
+            print(f"    ! 无法读取激光距离，跳过验证")
+            self.g.loggerUI.warn(f"[验证跳过] {part} 无法读取激光距离")
         
         # 清除状态
         delattr(self, '_calibration_state')
