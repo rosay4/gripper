@@ -78,41 +78,25 @@ class MotionModule:
             raw = getattr(self.g.feedbackData, name, None)
         return self._coerce_scalar(raw)
 
-    def _hold_position_command(self, part: str, target: float, hold_s: float, timeout_s: float = 5.0):
+    def _hold_position_command(self, part: str, target: float, hold_s: float):
         end_t = time.monotonic() + hold_s
         cmd = [float(target)]
-        start_time = time.monotonic()
         while time.monotonic() < end_t:
-            try:
-                self.g.robot.set_actions({part: {"type": "position", "position": cmd}})
-            except Exception as e:
-                if time.monotonic() - start_time > timeout_s:
-                    self.g.loggerUI.warning(f"_hold_position_command 超时或异常: {e}")
-                    return
+            self.g.robot.set_actions({part: {"type": "position", "position": cmd}})
             time.sleep(1 / CONTROL_HZ)
 
-    def _recover_motion_after_zero(self, part: str, pos_name: str = "gripper_pos", timeout_s: float = 5.0):
+    def _recover_motion_after_zero(self, part: str, pos_name: str = "gripper_pos"):
         # Re-latch position mode and resend a short hold command to avoid
         # post-set_zero non-responsive state seen on some drivers.
-        start_time = time.monotonic()
         try:
             self.g.robot.send_command(part, {"command": "set_control_mode", "mode": "position"})
-        except Exception as e:
-            if time.monotonic() - start_time > timeout_s:
-                self.g.loggerUI.warning(f"_recover_motion_after_zero: send_command 超时: {e}")
-                return
+        except Exception:
+            pass
         time.sleep(0.2)
-        try:
-            cur = self._get_feedback_scalar(pos_name)
-        except Exception as e:
-            self.g.loggerUI.warning(f"_recover_motion_after_zero: 获取位置失败: {e}")
-            cur = 0.0
+        cur = self._get_feedback_scalar(pos_name)
         if cur is None:
             cur = 0.0
-        try:
-            self._hold_position_command(part=part, target=cur, hold_s=0.4, timeout_s=timeout_s)
-        except Exception as e:
-            self.g.loggerUI.warning(f"_recover_motion_after_zero: _hold_position_command 异常: {e}")
+        self._hold_position_command(part=part, target=cur, hold_s=0.4)
 
     def _write_gripper_yaml_params(self, part: str, length_per_radian: float = None, offset_at_hardware_zero: float = None):
         yaml_path = f"/opt/robot/rb_hardware/{part}.yaml"
@@ -2078,14 +2062,11 @@ class MotionModule:
         self.g.robot.set_actions({part: {"type": "position", "position": [new_pos]}})
 
 
-    @hide_ui_while
     def set_zero(self,part):
         self.g.robot.send_command(part,{"command":"set_zero"})
         time.sleep(1)
         self._recover_motion_after_zero(part=part, pos_name="gripper_pos")
         self.g.loggerUI.info(f"{part}已硬件设零，并完成可动性恢复")
-
-    @hide_ui_while
     def set_zero_loadcell(self,part:str,ch=0):
         self.g.robot.send_command(part, {"command": "calibrate_zero","index":ch}) ## index 0 for left setzero
         time.sleep(1)
