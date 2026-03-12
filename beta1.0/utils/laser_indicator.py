@@ -77,10 +77,15 @@ class LaserIndicator:
             frame = self.format_set_zero_frame()
             if debug:
                 print(f"[{self.name}] set_zero send: {frame.hex(' ')}")
+            try:
+                self.serial.reset_input_buffer()
+                self.serial.reset_output_buffer()
+            except Exception:
+                pass
             self.serial.write(frame)
             ret = self.parse_set_zero_response(expected_frame=frame, debug=debug)
             return ret
-        except (serial.SerialException, TimeoutError):
+        except (serial.SerialException, TimeoutError, RuntimeError):
             return None
 
     def parse_data_response(self, timeout: float = 1.0) -> float:
@@ -115,15 +120,26 @@ class LaserIndicator:
                 response.extend(byte)
                 if debug:
                     print(f"[{self.name}] recv: {response.hex(' ')}")
-                if len(response) >= 8:
-                    data_without_crc = response[:-2]
-                    received_crc = int.from_bytes(response[-2:], byteorder="little")
+                # Try to parse normal response (8 bytes) or exception response (5 bytes)
+                while len(response) >= 5:
+                    # Prefer full 8-byte response if available
+                    frame_len = 8 if len(response) >= 8 else 5
+                    data_without_crc = response[:frame_len - 2]
+                    received_crc = int.from_bytes(response[frame_len - 2:frame_len], byteorder="little")
                     calculated_crc = self.calculate_crc(data_without_crc)
                     if received_crc != calculated_crc:
                         if debug:
                             print(f"[{self.name}] crc mismatch: recv={received_crc:04x}, calc={calculated_crc:04x}")
                         response.pop(0)
                         continue
+
+                    # Exception response: addr, func|0x80, code, crc
+                    if frame_len == 5 and (response[1] & 0x80):
+                        exc_func = response[1]
+                        exc_code = response[2]
+                        if debug:
+                            print(f"[{self.name}] exception: func=0x{exc_func:02x}, code=0x{exc_code:02x}")
+                        raise RuntimeError(f"{self.name}: Modbus exception func=0x{exc_func:02x}, code=0x{exc_code:02x}")
 
                     if expected_frame is not None:
                         # Modbus write responses usually echo address+function+data
