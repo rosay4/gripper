@@ -1226,6 +1226,10 @@ class MotionModule:
         print(f"    └─────────────────────────────────────┘")
         
         self.g.loggerUI.info(f"[标定完成] {part}: max={max_pos:.6f}, min={min_pos:.6f}, stroke_rad={stroke_rad:.6f}")
+        self.g.loggerUI.info(
+            f"[标定数据] {part}: laser_open={laser_open}, laser_close={laser_close}, "
+            f"stroke_rad={stroke_rad:.6f}, real_distance={real_distance}"
+        )
         
         # 检查激光数据有效性
         if laser_open is None or laser_close is None:
@@ -1257,6 +1261,11 @@ class MotionModule:
             print(f"  实际行程: {real_distance:.6f} m")
             print(f"  弧度变化: {stroke_rad:.6f} rad")
             print(f"  length_per_radian = {length_per_radian_10:.10f}")
+            self.g.loggerUI.info(
+                f"[参数计算] {part}: laser_open={laser_open}, laser_close={laser_close}, "
+                f"stroke_rad={stroke_rad:.6f}, real_distance={real_distance:.6f}, "
+                f"length_per_radian={length_per_radian_10:.10f}"
+            )
             
             # 写入yaml
             yaml_path = self._write_gripper_yaml_params(
@@ -1383,6 +1392,9 @@ class MotionModule:
                 jam_count=50,            # 连续50次（0.5秒）位置不变认为堵转
             )
             print(f"    ✓ 已到达真正闭合位置: {true_close_pos:.6f}")
+            self.g.loggerUI.info(
+                f"[阶段2-步骤5] {part}: true_close_pos={true_close_pos:.6f}"
+            )
         except Exception as e:
             print(f"    ✗ 移动到真正闭合位置失败: {e}")
             self.g.loggerUI.error(f"移动到真正闭合位置失败: {e}")
@@ -1396,9 +1408,14 @@ class MotionModule:
         
         print(f"\n    执行硬件设零...")
         try:
+            pos_before_zero = self._get_feedback_scalar(pos_name)
             self.set_zero(part=part)
+            pos_after_zero = self._get_feedback_scalar(pos_name)
             print(f"    ✓ 设零完成！")
             self.g.loggerUI.info(f"[设零完成] {part} 在真正闭合位置设零")
+            self.g.loggerUI.info(
+                f"[阶段2-步骤6] {part}: pos_before_zero={pos_before_zero}, pos_after_zero={pos_after_zero}"
+            )
         except Exception as e:
             print(f"    ✗ 设零失败: {e}")
             self.g.loggerUI.error(f"设零失败: {e}")
@@ -1419,10 +1436,17 @@ class MotionModule:
             self._smooth_move_to(part, pos_name, target_pos, duration=2.0)
             time.sleep(0.5)
             current_pos = self._get_feedback_scalar(pos_name)
+            current_laser = self._get_feedback_scalar("real_distance")
             if current_pos is None:
                 print(f"    ! 未读取到当前位置，回退使用目标值 0.025")
                 current_pos = target_pos
             print(f"    ✓ 已到达位置: {current_pos:.6f}")
+            if current_laser is not None:
+                print(f"    当前激光距离: {current_laser:.2f}mm")
+            self.g.loggerUI.info(
+                f"[阶段2-步骤7] {part}: target_pos={target_pos:.6f}, "
+                f"actual_pos={current_pos:.6f}, laser={current_laser}"
+            )
         except Exception as e:
             print(f"    ✗ 移动失败: {e}")
             self.g.loggerUI.error(f"移动失败: {e}")
@@ -1436,9 +1460,14 @@ class MotionModule:
         
         try:
             print(f"\n    执行硬件设零...")
+            pos_before_zero = self._get_feedback_scalar(pos_name)
             self.set_zero(part=part)
+            pos_after_zero = self._get_feedback_scalar(pos_name)
             print(f"    ✓ 设零完成！")
             self.g.loggerUI.info(f"[设零完成] {part} 在 0.025 位置设零")
+            self.g.loggerUI.info(
+                f"[阶段2-步骤8] {part}: pos_before_zero={pos_before_zero}, pos_after_zero={pos_after_zero}"
+            )
         except Exception as e:
             print(f"    ✗ 设零失败: {e}")
             self.g.loggerUI.error(f"设零失败: {e}")
@@ -1462,6 +1491,10 @@ class MotionModule:
             )
             print(f"    ✓ offset_at_hardware_zero 已设置为 {current_pos:.6f}")
             print(f"      文件: {yaml_path}")
+            self.g.loggerUI.info(
+                f"[阶段2-步骤9] {part}: offset_at_hardware_zero={current_pos:.6f}, "
+                f"pos_at_write={current_pos:.6f}"
+            )
             
             # 同步到UI
             if hasattr(self.g, "reload_robot_from_yaml"):
@@ -1501,6 +1534,10 @@ class MotionModule:
                 print(f"      偏差: {final_laser - TARGET_LASER:.2f}mm")
                 self.g.loggerUI.error(f"[验证失败] {part} 最终激光距离: {final_laser:.2f}mm，超出目标范围 {TARGET_LASER}±{LASER_TOLERANCE}mm")
                 print(f"\n    ! 警告: 标定结果可能不合格，请检查机械结构或重新标定")
+            self.g.loggerUI.info(
+                f"[阶段2-步骤10] {part}: final_laser={final_laser:.2f}mm, "
+                f"target={TARGET_LASER:.2f}mm, diff={final_laser - TARGET_LASER:.2f}mm"
+            )
         else:
             print(f"    ! 无法读取激光距离，跳过验证")
             self.g.loggerUI.warn(f"[验证跳过] {part} 无法读取激光距离")
