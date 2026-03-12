@@ -384,30 +384,6 @@ class GripperGuide(BaseGuide):
             status = "error"
         return left_val, right_val, status
 
-    def set_lasers_zero(self):
-        """
-        Laser distance sensors set-zero for left and right.
-        """
-        self._ensure_lasers()
-        if not self.laser_left and not self.laser_right:
-            self.loggerUI.error("laser set_zero failed: no laser connected")
-            input("按回车返回")
-            return
-        results = {}
-        if self.laser_left:
-            try:
-                results["left"] = self.laser_left.set_zero()
-            except Exception as e:
-                results["left"] = f"error:{e}"
-        if self.laser_right:
-            try:
-                results["right"] = self.laser_right.set_zero()
-            except Exception as e:
-                results["right"] = f"error:{e}"
-        self.loggerUI.info(f"laser set_zero results: {results}")
-        print(f"laser set_zero results: {results}")
-        input("按回车返回")
-
     def _shutdown_robot(self):
         if self.laser_left:
             try:
@@ -584,7 +560,7 @@ class GripperGuide(BaseGuide):
             },
             "8": {
                 "description": "【阶段1】激光测距仪归零",
-                "callback": self.set_lasers_zero,
+                "callback": self.motion.set_lasers_zero,
             },
         }
         self.push_menu(menu, "夹爪参数自动矫正")

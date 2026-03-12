@@ -2143,6 +2143,39 @@ class MotionModule:
         self.g.loggerUI.info(f"{part}的通道{ch}已硬件设零")
 
     @hide_ui_while
+    def set_lasers_zero(self):
+        """
+        Laser distance sensors set-zero for left and right.
+        """
+        try:
+            self.g._ensure_lasers()
+        except Exception as e:
+            self.g.loggerUI.error(f"laser set_zero failed: {e}")
+            input("按回车返回")
+            return
+
+        if not getattr(self.g, "laser_left", None) and not getattr(self.g, "laser_right", None):
+            self.g.loggerUI.error("laser set_zero failed: no laser connected")
+            input("按回车返回")
+            return
+
+        results = {}
+        if getattr(self.g, "laser_left", None):
+            try:
+                results["left"] = self.g.laser_left.set_zero()
+            except Exception as e:
+                results["left"] = f"error:{e}"
+        if getattr(self.g, "laser_right", None):
+            try:
+                results["right"] = self.g.laser_right.set_zero()
+            except Exception as e:
+                results["right"] = f"error:{e}"
+
+        self.g.loggerUI.info(f"laser set_zero results: {results}")
+        print(f"laser set_zero results: {results}")
+        input("按回车返回")
+
+    @hide_ui_while
     def calibrate_loadcell(self,part:str,ch:int):
         known_force = input("请输入已知的标定力值(单位N),回车继续:")
         self.g.robot.send_command(part,{"command":"calibrate_force","index":ch,"force":float(known_force)})
