@@ -1180,7 +1180,7 @@ class MotionModule:
         print("    稳定2秒后读取激光数据...")
         time.sleep(2.0)
         laser_open = self._get_feedback_scalar("real_distance")
-        print(f"    激光测距（张开）: laser_open = {laser_open:.6f} m")
+        print(f"    激光测距（张开）: laser_open = {laser_open:.6f} mm")
         
         # ========== 步骤2: 寻找负向极限（闭合） ==========
         print("\n" + "=" * 60)
@@ -1205,7 +1205,7 @@ class MotionModule:
         print("    稳定2秒后读取激光数据...")
         time.sleep(2.0)
         laser_close = self._get_feedback_scalar("real_distance")
-        print(f"    激光测距（闭合）: laser_close = {laser_close:.6f} m")
+        print(f"    激光测距（闭合）: laser_close = {laser_close:.6f} mm")
         
         # ========== 步骤3: 显示标定报告 ==========
         print("\n" + "=" * 60)
@@ -1218,11 +1218,11 @@ class MotionModule:
         print(f"\n    标定结果:")
         print(f"    ┌─────────────────────────────────────┐")
         print(f"    │  张开位置 (max): {max_pos:12.6f}     │")
-        print(f"    │  激光张开:       {laser_open:12.6f} m   │") if laser_open else print(f"    │  激光张开:       未读取               │")
+        print(f"    │  激光张开:       {laser_open:12.6f} mm  │") if laser_open else print(f"    │  激光张开:       未读取               │")
         print(f"    │  闭合位置 (min): {min_pos:12.6f}     │")
-        print(f"    │  激光闭合:       {laser_close:12.6f} m   │") if laser_close else print(f"    │  激光闭合:       未读取               │")
+        print(f"    │  激光闭合:       {laser_close:12.6f} mm  │") if laser_close else print(f"    │  激光闭合:       未读取               │")
         print(f"    │  弧度行程 (rad): {stroke_rad:11.6f}     │")
-        print(f"    │  实际行程 (m):   {real_distance:11.6f}     │") if real_distance else print(f"    │  实际行程 (m):   未计算               │")
+        print(f"    │  实际行程 (mm):  {real_distance:11.6f}     │") if real_distance else print(f"    │  实际行程 (mm):  未计算               │")
         print(f"    └─────────────────────────────────────┘")
         
         self.g.loggerUI.info(f"[标定完成] {part}: max={max_pos:.6f}, min={min_pos:.6f}, stroke_rad={stroke_rad:.6f}")
@@ -1258,7 +1258,7 @@ class MotionModule:
             length_per_radian_10 = round(length_per_radian, 10)
             
             print(f"\n计算结果:")
-            print(f"  实际行程: {real_distance:.6f} m")
+            print(f"  实际行程: {real_distance:.6f} mm")
             print(f"  弧度变化: {stroke_rad:.6f} rad")
             print(f"  length_per_radian = {length_per_radian_10:.10f}")
             self.g.loggerUI.info(
@@ -1447,6 +1447,35 @@ class MotionModule:
                 f"[阶段2-步骤7] {part}: target_pos={target_pos:.6f}, "
                 f"actual_pos={current_pos:.6f}, laser={current_laser}"
             )
+
+            # 闭环微调：依据激光距离收敛到 50±0.2mm
+            TARGET_LASER = 50.0
+            LASER_TOL = 0.2
+            MAX_ITERS = 20
+            STEP = 0.0002  # 小步进，避免过冲
+            if current_laser is None:
+                print("    ! 无法读取激光距离，跳过闭环微调")
+            else:
+                for i in range(1, MAX_ITERS + 1):
+                    if abs(current_laser - TARGET_LASER) <= LASER_TOL:
+                        print(f"    ✓ 激光到位: {current_laser:.2f}mm (迭代{ i })")
+                        break
+                    if current_laser > TARGET_LASER + LASER_TOL:
+                        # 太大，向闭合方向微调
+                        current_pos -= STEP
+                    else:
+                        # 太小，向张开方向微调
+                        current_pos += STEP
+                    self._hold_position_command(part=part, target=current_pos, hold_s=0.2)
+                    time.sleep(0.05)
+                    current_laser = self._get_feedback_scalar("real_distance")
+                    print(f"    [微调{i:02d}] pos={current_pos:.6f}, laser={current_laser:.2f}mm")
+                    self.g.loggerUI.info(
+                        f"[阶段2-步骤7-微调{i:02d}] {part}: pos={current_pos:.6f}, laser={current_laser}"
+                    )
+                else:
+                    print(f"    ! 微调结束仍未到位: laser={current_laser:.2f}mm")
+            # 保留微调后的位置作为 offset 写入值
         except Exception as e:
             print(f"    ✗ 移动失败: {e}")
             self.g.loggerUI.error(f"移动失败: {e}")
