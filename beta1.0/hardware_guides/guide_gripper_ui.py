@@ -1,4 +1,4 @@
-from prelude import *
+﻿from prelude import *
 from enum import Enum, auto
 import serial
 import serial.tools.list_ports
@@ -384,6 +384,30 @@ class GripperGuide(BaseGuide):
             status = "error"
         return left_val, right_val, status
 
+    def set_lasers_zero(self):
+        """
+        Laser distance sensors set-zero for left and right.
+        """
+        self._ensure_lasers()
+        if not self.laser_left and not self.laser_right:
+            self.loggerUI.error("laser set_zero failed: no laser connected")
+            input("按回车返回")
+            return
+        results = {}
+        if self.laser_left:
+            try:
+                results["left"] = self.laser_left.set_zero()
+            except Exception as e:
+                results["left"] = f"error:{e}"
+        if self.laser_right:
+            try:
+                results["right"] = self.laser_right.set_zero()
+            except Exception as e:
+                results["right"] = f"error:{e}"
+        self.loggerUI.info(f"laser set_zero results: {results}")
+        print(f"laser set_zero results: {results}")
+        input("按回车返回")
+
     def _shutdown_robot(self):
         if self.laser_left:
             try:
@@ -559,10 +583,8 @@ class GripperGuide(BaseGuide):
                 ),
             },
             "8": {
-                "description": "【阶段1】计算并写入length_per_radian",
-                "callback": lambda: self.motion.calculate_and_write_length_per_radian(
-                    part=self.selected_gripper,
-                ),
+                "description": "【阶段1】激光测距仪归零",
+                "callback": self.set_lasers_zero,
             },
         }
         self.push_menu(menu, "夹爪参数自动矫正")
@@ -610,7 +632,7 @@ if __name__ == "__main__":
     hblog.info("test","Gripper Guide Start")
     guide = GripperGuide()
     guide.push_menu({
-        "1":{"description":"夹爪参数自动矫正","callback":guide.task_gripper_param_calibration},
+        "1":{"description":"夹爪参数自动校准","callback":guide.task_gripper_param_calibration},
         "2":{"description":"一维力传感器设零与标定","callback":guide.task_loadcell},
         "3":{"description":"夹爪基础功能","callback":guide.gripper_basic},
         "4":{"description":"夹爪运控测试","callback":guide.gripper_motion_accuracy},
