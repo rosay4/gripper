@@ -2413,6 +2413,7 @@ class MotionModule:
         raw_input = input("设置超时时间(秒),默认3秒，回车继续: ")
         timeout_s = float(raw_input) if raw_input else 3.0
 
+        fig = None
         try:
             # 根据超时时间配置绘图缓存长度，避免只显示固定时长
             max_points = int(max(1000, (timeout_s + 5.0) * CONTROL_HZ))
@@ -2558,8 +2559,17 @@ class MotionModule:
             print(e)
 
         finally:
+            if fig is not None:
+                try:
+                    tstamp = time.strftime("%Y%m%d_%H%M%S")
+                    save_path = f"{project_root}/logs/grasp_test_{tstamp}_{part}.png"
+                    fig.savefig(save_path, dpi=200, bbox_inches='tight')
+                    print(f"图已保存: {save_path}")
+                except Exception as e:
+                    print(f"图保存失败: {e}")
             plt.ioff()
-            plt.close(fig)
+            if fig is not None:
+                plt.close(fig)
 
     @hide_ui_while
     def integrity_test(self, part: str, pos_name: str):
