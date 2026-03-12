@@ -2406,75 +2406,75 @@ class MotionModule:
             record_tip_1 = np.array(getattr(self.g.feedbackData, "force_tip"))
             record_temperature_1 = np.array(getattr(self.g.feedbackData, "temperature"))
 
-        MAX_POINTS = 500
-
-        buf_time = deque(maxlen=MAX_POINTS)
-        buf_q = deque(maxlen=MAX_POINTS)
-        buf_temp = deque(maxlen=MAX_POINTS)
-        buf_torque = deque(maxlen=MAX_POINTS)
-        buf_force_0 = deque(maxlen=MAX_POINTS)
-        buf_force_1 = deque(maxlen=MAX_POINTS)
-
-        # ===== 主线程创建图（关键）=====
-        plt.ion()
-        fig, axes = plt.subplots(4, 1, figsize=(8, 8), sharex=True)
-
-        ax_q, ax_temp, ax_torque, ax_force = axes
-
-        line_q, = ax_q.plot([], [], 'b-', label="Position")
-        line_temp, = ax_temp.plot([], [], 'r-', label="Temperature")
-        line_torque, = ax_torque.plot([], [], 'g-', label="Torque")
-        line_force_0, = ax_force.plot([],[],'c-',label="Tip[0]")
-        line_force_1, = ax_force.plot([],[],'m-',label="Tip[1]")
-        ax_q.set_ylabel("Position")
-        ax_temp.set_ylabel("Temperature")
-        ax_torque.set_ylabel("Torque")
-        ax_torque.set_xlabel("Time (s)")
-        ax_force.set_ylabel("Tip Force")
-        # ===== 数值显示（右上角）=====
-        txt_q = ax_q.text(
-            0.98, 0.95, "",
-            transform=ax_q.transAxes,
-            ha="right", va="top"
-        )
-
-        txt_temp = ax_temp.text(
-            0.98, 0.95, "",
-            transform=ax_temp.transAxes,
-            ha="right", va="top"
-        )
-
-        txt_torque = ax_torque.text(
-            0.98, 0.95, "",
-            transform=ax_torque.transAxes,
-            ha="right", va="top"
-        )
-
-        txt_force = ax_force.text(
-            0.98, 0.95, "",
-            transform=ax_force.transAxes,
-            ha="right", va="top"
-        )
-        for ax in axes:
-            ax.grid(True)
-            ax.legend()
-
-        last_plot_time = 0.0
-        PLOT_DT = 0.05  # 20 Hz 刷新
-
-        # ===== 清空日志 =====
-        self.g.highfreq_log.clear()
-        self.g.lowfreq_log.clear()
-
         user_input = input("[堵转测试步骤2] 请输入目标位置 (逗号分隔) 或 'q' 退出: ").strip()
         if user_input.lower() == 'q':
-            plt.close(fig)
             return
 
         raw_input = input("设置超时时间(秒),默认3秒，回车继续: ")
         timeout_s = float(raw_input) if raw_input else 3.0
 
         try:
+            # 根据超时时间配置绘图缓存长度，避免只显示固定时长
+            max_points = int(max(1000, (timeout_s + 5.0) * CONTROL_HZ))
+
+            buf_time = deque(maxlen=max_points)
+            buf_q = deque(maxlen=max_points)
+            buf_temp = deque(maxlen=max_points)
+            buf_torque = deque(maxlen=max_points)
+            buf_force_0 = deque(maxlen=max_points)
+            buf_force_1 = deque(maxlen=max_points)
+
+            # ===== 主线程创建图（关键）=====
+            plt.ion()
+            fig, axes = plt.subplots(4, 1, figsize=(8, 8), sharex=True)
+
+            ax_q, ax_temp, ax_torque, ax_force = axes
+
+            line_q, = ax_q.plot([], [], 'b-', label="Position")
+            line_temp, = ax_temp.plot([], [], 'r-', label="Temperature")
+            line_torque, = ax_torque.plot([], [], 'g-', label="Torque")
+            line_force_0, = ax_force.plot([],[],'c-',label="Tip[0]")
+            line_force_1, = ax_force.plot([],[],'m-',label="Tip[1]")
+            ax_q.set_ylabel("Position")
+            ax_temp.set_ylabel("Temperature")
+            ax_torque.set_ylabel("Torque")
+            ax_torque.set_xlabel("Time (s)")
+            ax_force.set_ylabel("Tip Force")
+            # ===== 数值显示（右上角）=====
+            txt_q = ax_q.text(
+                0.98, 0.95, "",
+                transform=ax_q.transAxes,
+                ha="right", va="top"
+            )
+
+            txt_temp = ax_temp.text(
+                0.98, 0.95, "",
+                transform=ax_temp.transAxes,
+                ha="right", va="top"
+            )
+
+            txt_torque = ax_torque.text(
+                0.98, 0.95, "",
+                transform=ax_torque.transAxes,
+                ha="right", va="top"
+            )
+
+            txt_force = ax_force.text(
+                0.98, 0.95, "",
+                transform=ax_force.transAxes,
+                ha="right", va="top"
+            )
+            for ax in axes:
+                ax.grid(True)
+                ax.legend()
+
+            last_plot_time = 0.0
+            PLOT_DT = 0.05  # 20 Hz 刷新
+
+            # ===== 清空日志 =====
+            self.g.highfreq_log.clear()
+            self.g.lowfreq_log.clear()
+
             q_pos = np.array([float(x.strip()) for x in user_input.split(',')])
             print(f"移动到新位置: {[f'{p:.3f}' for p in q_pos]}")
 

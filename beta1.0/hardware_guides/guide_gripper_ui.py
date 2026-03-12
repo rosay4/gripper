@@ -145,6 +145,7 @@ class GripperGuide(BaseGuide):
                         feedback_pos=self.feedbackData.gripper_pos,
                         feedback_vel=self.feedbackData.gripper_vel,
                         feedback_torque=self.feedbackData.gripper_torque,
+                        feedback_temperature=self.feedbackData.temperature,
                     )
                 next_time += period
             except Exception as e:

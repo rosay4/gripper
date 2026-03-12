@@ -46,6 +46,7 @@ def prepare_highfreq(highfreq):
     positions = []
     velocities = []
     torques = []
+    temps = []
     for entry in highfreq:
         rb_times.append(float(entry.get("rb_time", np.nan)))
         pos = entry.get("highfreq_pos", None)
@@ -66,12 +67,18 @@ def prepare_highfreq(highfreq):
             torques.append(np.array(tq, dtype=float))
         else:
             torques.append(np.full(1, np.nan))
+        temp = entry.get("highfreq_temp", None)
+        if temp is not None:
+            temps.append(np.array([temp], dtype=float))
+        else:
+            temps.append(np.full(1, np.nan))
     # NumPy
     return (
         np.array(rb_times),
         np.stack(positions),
         np.stack(velocities),
-        np.stack(torques)
+        np.stack(torques),
+        np.stack(temps)
     )
 
 def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig="viz_multi.png"):
@@ -87,7 +94,7 @@ def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig=
 
     # 准备数据（使用原始函数）
     rb_low, pc_times, t_in_trajs, cmd_pos, fb_at_send = prepare_lowfreq(lowfreq)
-    rb_high, high_freq, high_freq_vel, high_freq_torque = prepare_highfreq(highfreq)
+    rb_high, high_freq, high_freq_vel, high_freq_torque, high_freq_temp = prepare_highfreq(highfreq)
 
     # 只移除NaN值，不做复杂的清理
     low_valid = ~np.isnan(rb_low) & ~np.any(np.isnan(cmd_pos), axis=1) & ~np.any(np.isnan(fb_at_send), axis=1)
@@ -101,6 +108,7 @@ def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig=
     high_freq = high_freq[high_valid]
     high_freq_vel = high_freq_vel[high_valid]
     high_freq_torque = high_freq_torque[high_valid]
+    high_freq_temp = high_freq_temp[high_valid]
 
     if rb_high.size == 0 or rb_low.size == 0:
         print("⚠️ 有效数据为空")
@@ -213,6 +221,18 @@ def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig=
     fig_v.savefig(vel_save_path, dpi=200, bbox_inches='tight')
     print(f"✅ 高频速度图已保存为 {vel_save_path}")
 
+
+    # ===== 新图：温度（单通道）=====
+    if high_freq_temp.size > 0 and not np.all(np.isnan(high_freq_temp)):
+        fig_t, axt = plt.subplots(figsize=(10, 4))
+        axt.plot(rb_high - rb_high[0], high_freq_temp[:, 0], color='tab:red', linewidth=1.2, label="Temperature")
+        axt.set_xlabel("Relative Time (s)")
+        axt.set_ylabel("Temperature (°C)")
+        axt.grid(True, alpha=0.3)
+        axt.legend(fontsize='small')
+        temp_save_path = f"{project_root}/logs/temp_{savefig}"
+        fig_t.savefig(temp_save_path, dpi=200, bbox_inches='tight')
+        print(f"Saved temperature plot: {temp_save_path}")
 
     plt.show()
 
@@ -331,7 +351,7 @@ def draw_step_response_analysis(log_dir=".",
 
     # 准备数据
     rb_low, pc_times, t_in_trajs, cmd_pos, fb_at_send = prepare_lowfreq(lowfreq)
-    rb_high, high_freq, high_freq_vel, high_freq_torque = prepare_highfreq(highfreq)
+    rb_high, high_freq, high_freq_vel, high_freq_torque, _ = prepare_highfreq(highfreq)
 
     # 清理 NaN
     low_valid = ~np.isnan(rb_low) & ~np.any(np.isnan(cmd_pos), axis=1) & ~np.any(np.isnan(fb_at_send), axis=1)

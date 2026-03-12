@@ -7,12 +7,13 @@ BASE_DIR = Path(__file__).parent.parent
 class LogModule:
     def __init__(self,guide):
         self.g = guide
-    def push_highfreq(self,rb_time,feedback_pos,feedback_vel=None,feedback_torque=None):
+    def push_highfreq(self,rb_time,feedback_pos,feedback_vel=None,feedback_torque=None,feedback_temperature=None):
         self.g.highfreq_log.append({
             "rb_time":rb_time,
             "highfreq_pos":feedback_pos,
             "highfreq_vel":feedback_vel,
             "highfreq_toq":feedback_torque,
+            "highfreq_temp":feedback_temperature,
         })
     def _record_lowfreq(self,t,q,rb_time,feedback_pos):
         """控制侧日志(20Hz)"""
