@@ -1418,7 +1418,11 @@ class MotionModule:
             # 使用 _smooth_move_to 进行平滑移动
             self._smooth_move_to(part, pos_name, target_pos, duration=2.0)
             time.sleep(0.5)
-            print(f"    ✓ 已到达 0.025 位置")
+            current_pos = self._get_feedback_scalar(pos_name)
+            if current_pos is None:
+                print(f"    ! 未读取到当前位置，回退使用目标值 0.025")
+                current_pos = target_pos
+            print(f"    ✓ 已到达位置: {current_pos:.6f}")
         except Exception as e:
             print(f"    ✗ 移动失败: {e}")
             self.g.loggerUI.error(f"移动失败: {e}")
@@ -1441,16 +1445,17 @@ class MotionModule:
             input("按回车返回")
             return
         
-        # ========== 步骤9: 写入当前 gripper_pos 到 offset_at_hardware_zero ==========
+        # ========== 步骤9: 写入步骤7到达的 gripper_pos 到 offset_at_hardware_zero ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤9: 写入当前 gripper_pos 到 offset_at_hardware_zero")
+        print(">>> 步骤9: 写入步骤7到达的 gripper_pos 到 offset_at_hardware_zero")
         print("=" * 60)
         
         try:
-            current_pos = self._get_feedback_scalar(pos_name)
-            if current_pos is None:
-                print("    ! 未读取到当前 gripper_pos，回退使用 0.025")
-                current_pos = 0.025
+            if 'current_pos' not in locals():
+                current_pos = self._get_feedback_scalar(pos_name)
+                if current_pos is None:
+                    print("    ! 未读取到当前 gripper_pos，回退使用 0.025")
+                    current_pos = 0.025
             yaml_path = self._write_gripper_yaml_params(
                 part=part,
                 offset_at_hardware_zero=current_pos,
