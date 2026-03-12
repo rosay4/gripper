@@ -2162,12 +2162,14 @@ class MotionModule:
         results = {}
         if getattr(self.g, "laser_left", None):
             try:
-                results["left"] = self.g.laser_left.set_zero()
+                print(f"[LaserLeft] port={self.g.laser_left.port}, open={self.g.laser_left.serial is not None and self.g.laser_left.serial.is_open}")
+                results["left"] = self.g.laser_left.set_zero(debug=True)
             except Exception as e:
                 results["left"] = f"error:{e}"
         if getattr(self.g, "laser_right", None):
             try:
-                results["right"] = self.g.laser_right.set_zero()
+                print(f"[LaserRight] port={self.g.laser_right.port}, open={self.g.laser_right.serial is not None and self.g.laser_right.serial.is_open}")
+                results["right"] = self.g.laser_right.set_zero(debug=True)
             except Exception as e:
                 results["right"] = f"error:{e}"
 

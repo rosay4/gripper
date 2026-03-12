@@ -70,13 +70,15 @@ class LaserIndicator:
         except (ValueError, serial.SerialException, TimeoutError):
             return None
 
-    def set_zero(self) -> bool | None:
+    def set_zero(self, debug: bool = False) -> bool | None:
         if not self.serial or not self.serial.is_open:
             raise ConnectionError(f"{self.name}: Serial connection is not established.")
         try:
             frame = self.format_set_zero_frame()
+            if debug:
+                print(f"[{self.name}] set_zero send: {frame.hex(' ')}")
             self.serial.write(frame)
-            ret = self.parse_set_zero_response(expected_frame=frame)
+            ret = self.parse_set_zero_response(expected_frame=frame, debug=debug)
             return ret
         except (serial.SerialException, TimeoutError):
             return None
@@ -104,30 +106,38 @@ class LaserIndicator:
                     return value
         raise TimeoutError(f"{self.name}: Response not received data within {timeout} seconds.")
 
-    def parse_set_zero_response(self, timeout: float = 1.0, expected_frame: bytes | None = None) -> bool:
+    def parse_set_zero_response(self, timeout: float = 1.0, expected_frame: bytes | None = None, debug: bool = False) -> bool:
         start_time = time.time()
         response = bytearray()
         while time.time() - start_time < timeout:
             if self.serial.in_waiting > 0:
                 byte = self.serial.read(1)
                 response.extend(byte)
+                if debug:
+                    print(f"[{self.name}] recv: {response.hex(' ')}")
                 if len(response) >= 8:
                     data_without_crc = response[:-2]
                     received_crc = int.from_bytes(response[-2:], byteorder="little")
                     calculated_crc = self.calculate_crc(data_without_crc)
                     if received_crc != calculated_crc:
+                        if debug:
+                            print(f"[{self.name}] crc mismatch: recv={received_crc:04x}, calc={calculated_crc:04x}")
                         response.pop(0)
                         continue
 
                     if expected_frame is not None:
                         # Modbus write responses usually echo address+function+data
                         if response[:6] != expected_frame[:6]:
+                            if debug:
+                                print(f"[{self.name}] echo mismatch: recv={response[:6].hex(' ')}, expected={expected_frame[:6].hex(' ')}")
                             response.pop(0)
                             continue
                         return True
 
                     # Fallback: accept any valid CRC response
                     return True
+        if debug:
+            print(f"[{self.name}] set_zero timeout, raw={response.hex(' ')}")
         raise TimeoutError(
             f"{self.name}: Response not received command response within {timeout} seconds."
         )
