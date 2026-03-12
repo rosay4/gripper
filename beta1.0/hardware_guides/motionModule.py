@@ -1503,17 +1503,13 @@ class MotionModule:
             input("按回车返回")
             return
         
-        # ========== 步骤9: 写入步骤7到达的 gripper_pos 到 offset_at_hardware_zero ==========
+        # ========== 步骤9: 设置 offset_at_hardware_zero = 0.025 ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤9: 写入步骤7到达的 gripper_pos 到 offset_at_hardware_zero")
+        print(">>> 步骤9: 设置 offset_at_hardware_zero = 0.025")
         print("=" * 60)
         
         try:
-            if 'current_pos' not in locals():
-                current_pos = self._get_feedback_scalar(pos_name)
-                if current_pos is None:
-                    print("    ! 未读取到当前 gripper_pos，回退使用 0.025")
-                    current_pos = 0.025
+            current_pos = 0.025
             yaml_path = self._write_gripper_yaml_params(
                 part=part,
                 offset_at_hardware_zero=current_pos,
@@ -1521,8 +1517,7 @@ class MotionModule:
             print(f"    ✓ offset_at_hardware_zero 已设置为 {current_pos:.6f}")
             print(f"      文件: {yaml_path}")
             self.g.loggerUI.info(
-                f"[阶段2-步骤9] {part}: offset_at_hardware_zero={current_pos:.6f}, "
-                f"pos_at_write={current_pos:.6f}"
+                f"[阶段2-步骤9] {part}: offset_at_hardware_zero={current_pos:.6f}"
             )
             
             # 同步到UI
