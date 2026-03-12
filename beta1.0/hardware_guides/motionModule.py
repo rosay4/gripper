@@ -1441,17 +1441,21 @@ class MotionModule:
             input("按回车返回")
             return
         
-        # ========== 步骤9: 设置 offset_at_hardware_zero = 0.025 ==========
+        # ========== 步骤9: 写入当前 gripper_pos 到 offset_at_hardware_zero ==========
         print("\n" + "=" * 60)
-        print(">>> 步骤9: 设置 offset_at_hardware_zero = 0.025")
+        print(">>> 步骤9: 写入当前 gripper_pos 到 offset_at_hardware_zero")
         print("=" * 60)
         
         try:
+            current_pos = self._get_feedback_scalar(pos_name)
+            if current_pos is None:
+                print("    ! 未读取到当前 gripper_pos，回退使用 0.025")
+                current_pos = 0.025
             yaml_path = self._write_gripper_yaml_params(
                 part=part,
-                offset_at_hardware_zero=0.025,
+                offset_at_hardware_zero=current_pos,
             )
-            print(f"    ✓ offset_at_hardware_zero 已设置为 0.025")
+            print(f"    ✓ offset_at_hardware_zero 已设置为 {current_pos:.6f}")
             print(f"      文件: {yaml_path}")
             
             # 同步到UI
@@ -1461,7 +1465,7 @@ class MotionModule:
             else:
                 print(f"    ! reload_robot_from_yaml() 未找到，请手动重启")
             
-            self.g.loggerUI.info(f"[参数更新] {part}: offset_at_hardware_zero=0.025")
+            self.g.loggerUI.info(f"[参数更新] {part}: offset_at_hardware_zero={current_pos:.6f}")
         except Exception as e:
             print(f"    ✗ 写入或同步失败: {e}")
             self.g.loggerUI.error(f"写入或同步失败: {e}")
