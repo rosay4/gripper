@@ -120,34 +120,35 @@ class LaserIndicator:
                 response.extend(byte)
                 if debug:
                     print(f"[{self.name}] recv: {response.hex(' ')}")
-                # Try to parse normal response (8 bytes) or exception response (5 bytes)
-                while len(response) >= 5:
-                    # Prefer full 8-byte response if available
-                    frame_len = 8 if len(response) >= 8 else 5
-                    data_without_crc = response[:frame_len - 2]
-                    received_crc = int.from_bytes(response[frame_len - 2:frame_len], byteorder="little")
+                # Prefer parsing full 8-byte response; resync on sliding window
+                while len(response) >= 8:
+                    window = response[:8]
+                    data_without_crc = window[:6]
+                    received_crc = int.from_bytes(window[6:8], byteorder="little")
                     calculated_crc = self.calculate_crc(data_without_crc)
-                    # Exception response: addr, func|0x80, code, crc
-                    if frame_len == 5 and (response[1] & 0x80):
-                        exc_func = response[1]
-                        exc_code = response[2]
-                        if debug:
-                            print(f"[{self.name}] exception: func=0x{exc_func:02x}, code=0x{exc_code:02x}")
-                        raise RuntimeError(f"{self.name}: Modbus exception func=0x{exc_func:02x}, code=0x{exc_code:02x}")
-
                     if expected_frame is not None:
-                        # Modbus write responses usually echo address+function+data
-                        if response[:6] != expected_frame[:6]:
+                        if window[:6] != expected_frame[:6]:
                             if debug:
-                                print(f"[{self.name}] echo mismatch: recv={response[:6].hex(' ')}, expected={expected_frame[:6].hex(' ')}")
+                                print(f"[{self.name}] echo mismatch: recv={window[:6].hex(' ')}, expected={expected_frame[:6].hex(' ')}")
                             response.pop(0)
                             continue
                         if debug and received_crc != calculated_crc:
                             print(f"[{self.name}] crc mismatch (ignored): recv={received_crc:04x}, calc={calculated_crc:04x}")
                         return True
-
-                    # Fallback: accept any valid CRC response
                     return True
+
+                # Exception response: addr, func|0x80, code, crc (5 bytes)
+                if len(response) >= 5:
+                    window = response[:5]
+                    data_without_crc = window[:3]
+                    received_crc = int.from_bytes(window[3:5], byteorder="little")
+                    calculated_crc = self.calculate_crc(data_without_crc)
+                    if (window[1] & 0x80) and received_crc == calculated_crc:
+                        exc_func = window[1]
+                        exc_code = window[2]
+                        if debug:
+                            print(f"[{self.name}] exception: func=0x{exc_func:02x}, code=0x{exc_code:02x}")
+                        raise RuntimeError(f"{self.name}: Modbus exception func=0x{exc_func:02x}, code=0x{exc_code:02x}")
         if debug:
             print(f"[{self.name}] set_zero timeout, raw={response.hex(' ')}")
         raise TimeoutError(
