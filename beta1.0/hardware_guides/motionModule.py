@@ -2147,16 +2147,22 @@ class MotionModule:
         """
         Laser distance sensors set-zero for left and right.
         """
+        # Pause laser reading to avoid read/write frame collisions.
+        prev_pause = getattr(self.g, "_laser_pause", False)
+        self.g._laser_pause = True
+        time.sleep(0.1)
         try:
             self.g._ensure_lasers()
         except Exception as e:
             self.g.loggerUI.error(f"laser set_zero failed: {e}")
             input("按回车返回")
+            self.g._laser_pause = prev_pause
             return
 
         if not getattr(self.g, "laser_left", None) and not getattr(self.g, "laser_right", None):
             self.g.loggerUI.error("laser set_zero failed: no laser connected")
             input("按回车返回")
+            self.g._laser_pause = prev_pause
             return
 
         results = {}
@@ -2175,6 +2181,8 @@ class MotionModule:
 
         self.g.loggerUI.info(f"laser set_zero results: {results}")
         print(f"laser set_zero results: {results}")
+        time.sleep(0.2)
+        self.g._laser_pause = prev_pause
         input("按回车返回")
 
     @hide_ui_while

@@ -28,6 +28,7 @@ class GripperGuide(BaseGuide):
         self.laser_scan_interval = LASER_SCAN_COOLDOWN_SEC
         self._laser_next_scan = 0.0
         self._laser_last_status = None
+        self._laser_pause = False
         class FeedbackItem:
             def __init__(self):
                 self.gripper_pos = -1
@@ -62,24 +63,25 @@ class GripperGuide(BaseGuide):
                 if now < next_time:
                     time.sleep(next_time - now)
                 # 0. Laser
-                if now >= self._laser_next_scan:
-                    self._ensure_lasers()
-                    self._laser_next_scan = now + self.laser_scan_interval
-                if self.laser_left or self.laser_right:
-                    if now >= self._laser_next_time:
-                        left_val, right_val, status = self._read_lasers()
-                        with self.feedback_lock:
-                            if left_val is not None:
-                                self.feedbackData.laser_left = [left_val]
-                            if right_val is not None:
-                                self.feedbackData.laser_right = [right_val]
-                            if left_val is not None and right_val is not None:
-                                self.feedbackData.real_distance = left_val + right_val
-                            self.feedbackData.laser_status = status
-                        if status.startswith("error"):
-                            # drop connections to allow re-scan
-                            self._disconnect_lasers()
-                        self._laser_next_time = now + self.laser_read_interval
+                if not self._laser_pause:
+                    if now >= self._laser_next_scan:
+                        self._ensure_lasers()
+                        self._laser_next_scan = now + self.laser_scan_interval
+                    if self.laser_left or self.laser_right:
+                        if now >= self._laser_next_time:
+                            left_val, right_val, status = self._read_lasers()
+                            with self.feedback_lock:
+                                if left_val is not None:
+                                    self.feedbackData.laser_left = [left_val]
+                                if right_val is not None:
+                                    self.feedbackData.laser_right = [right_val]
+                                if left_val is not None and right_val is not None:
+                                    self.feedbackData.real_distance = left_val + right_val
+                                self.feedbackData.laser_status = status
+                            if status.startswith("error"):
+                                # drop connections to allow re-scan
+                                self._disconnect_lasers()
+                            self._laser_next_time = now + self.laser_read_interval
                 # 1. 基础状态
                 feed = self.robot.get_states()
                 if not feed:
