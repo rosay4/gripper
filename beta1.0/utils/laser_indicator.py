@@ -127,12 +127,6 @@ class LaserIndicator:
                     data_without_crc = response[:frame_len - 2]
                     received_crc = int.from_bytes(response[frame_len - 2:frame_len], byteorder="little")
                     calculated_crc = self.calculate_crc(data_without_crc)
-                    if received_crc != calculated_crc:
-                        if debug:
-                            print(f"[{self.name}] crc mismatch: recv={received_crc:04x}, calc={calculated_crc:04x}")
-                        response.pop(0)
-                        continue
-
                     # Exception response: addr, func|0x80, code, crc
                     if frame_len == 5 and (response[1] & 0x80):
                         exc_func = response[1]
@@ -148,6 +142,8 @@ class LaserIndicator:
                                 print(f"[{self.name}] echo mismatch: recv={response[:6].hex(' ')}, expected={expected_frame[:6].hex(' ')}")
                             response.pop(0)
                             continue
+                        if debug and received_crc != calculated_crc:
+                            print(f"[{self.name}] crc mismatch (ignored): recv={received_crc:04x}, calc={calculated_crc:04x}")
                         return True
 
                     # Fallback: accept any valid CRC response
