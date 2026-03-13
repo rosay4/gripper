@@ -2168,19 +2168,22 @@ class MotionModule:
         results = {}
         if getattr(self.g, "laser_left", None):
             try:
-                print(f"[LaserLeft] port={self.g.laser_left.port}, open={self.g.laser_left.serial is not None and self.g.laser_left.serial.is_open}")
-                results["left"] = self.g.laser_left.set_zero(debug=True)
+                self.g.loggerUI.info(
+                    f"[LaserLeft] port={self.g.laser_left.port}, open={self.g.laser_left.serial is not None and self.g.laser_left.serial.is_open}"
+                )
+                results["left"] = self.g.laser_left.set_zero(debug=False)
             except Exception as e:
                 results["left"] = f"error:{e}"
         if getattr(self.g, "laser_right", None):
             try:
-                print(f"[LaserRight] port={self.g.laser_right.port}, open={self.g.laser_right.serial is not None and self.g.laser_right.serial.is_open}")
-                results["right"] = self.g.laser_right.set_zero(debug=True)
+                self.g.loggerUI.info(
+                    f"[LaserRight] port={self.g.laser_right.port}, open={self.g.laser_right.serial is not None and self.g.laser_right.serial.is_open}"
+                )
+                results["right"] = self.g.laser_right.set_zero(debug=False)
             except Exception as e:
                 results["right"] = f"error:{e}"
 
         self.g.loggerUI.info(f"laser set_zero results: {results}")
-        print(f"laser set_zero results: {results}")
         time.sleep(0.2)
         self.g._laser_pause = prev_pause
         input("按回车返回")
