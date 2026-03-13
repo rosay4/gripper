@@ -2237,6 +2237,106 @@ class MotionModule:
     def get_limits(self,part):
         print("当前关节范围:",self.g.robot.send_command(part, {"command": "get_limit"}))
         input("回车以返回")
+
+    @hide_ui_while
+    def zero_limit_travel_test(self, part: str, pos_name: str = "gripper_pos"):
+        """
+        零位行程和限位测试：
+        - 记录零点/0.05位置激光测距（mm）
+        - 记录零点误差、软限位行程误差（相对0.05）
+        - 记录多个目标输入的实际gripper_pos（含reload后的值）
+        """
+        def read_pos():
+            return self._get_feedback_scalar(pos_name)
+
+        def read_laser():
+            return self._get_feedback_scalar("real_distance")
+
+        def move_and_wait(target: float, wait_s: float = 0.0):
+            ok = self._move_to_target(part=part, pos_name=pos_name, target=target, timeout_s=5.0)
+            if not ok:
+                self.g.loggerUI.warn(f"move to {target:.6f} timeout")
+            if wait_s > 0:
+                time.sleep(wait_s)
+
+        def reload_and_wait():
+            if not hasattr(self.g, "reload_robot_from_yaml"):
+                raise RuntimeError("reload_robot_from_yaml not available")
+            self.g.reload_robot_from_yaml()
+            time.sleep(0.5)
+
+        try:
+            # 0.0
+            move_and_wait(0.0, wait_s=2.0)
+            zero_laser_mm = read_laser()
+            zero_pos = read_pos()
+
+            # 0.05
+            move_and_wait(0.05, wait_s=2.0)
+            soft_laser_mm = read_laser()
+            soft_pos = read_pos()
+
+            # 0.055
+            move_and_wait(0.055, wait_s=0.5)
+            pos_0055 = read_pos()
+
+            # reload after 0.055
+            reload_and_wait()
+            pos_0055_reload = read_pos()
+
+            # -0.005
+            move_and_wait(-0.005, wait_s=0.5)
+            pos_neg_0005 = read_pos()
+
+            # reload after -0.005
+            reload_and_wait()
+            pos_neg_0005_reload = read_pos()
+
+            # errors (target value for soft limit is 0.05 per requirement)
+            zero_error_mm = None if zero_laser_mm is None else (zero_laser_mm - 0.0)
+            soft_travel_error_mm = None if soft_laser_mm is None else (soft_laser_mm - 0.05)
+
+            # write CSV
+            log_dir = Path(project_root) / "logs"
+            log_dir.mkdir(exist_ok=True)
+            tstamp = time.strftime("%Y%m%d_%H%M%S")
+            csv_path = log_dir / f"zero_limit_test_{tstamp}_{part}.csv"
+            headers = [
+                "零点位置激光测距（mm）",
+                "软限位置（0.05）激光测距（mm）",
+                "零点误差（mm）",
+                "软限位行程误差（mm）",
+                "0.0输入的gripper_pos",
+                "0.05的gripper_pos",
+                "0.055的gripper_pos",
+                "0.055断电重启的gripper_pos",
+                "-0.005的gripper_pos",
+                "-0.005断电重启的gripper_pos",
+            ]
+            row = [
+                zero_laser_mm,
+                soft_laser_mm,
+                zero_error_mm,
+                soft_travel_error_mm,
+                zero_pos,
+                soft_pos,
+                pos_0055,
+                pos_0055_reload,
+                pos_neg_0005,
+                pos_neg_0005_reload,
+            ]
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                writer.writerow(row)
+
+            self.g.loggerUI.info(f"零位行程和限位测试已保存: {csv_path}")
+            print(f"零位行程和限位测试已保存: {csv_path}")
+            input("按回车返回")
+        except Exception as e:
+            self.g.loggerUI.error(f"零位行程和限位测试失败: {e}")
+            print(f"零位行程和限位测试失败: {e}")
+            input("按回车返回")
     
     def move_multiple_points(self):
         #从csv文件加载为dict

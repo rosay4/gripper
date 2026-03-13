@@ -511,6 +511,13 @@ class GripperGuide(BaseGuide):
                     part=self.selected_loadcell,
                 ),
             },
+            "4": {
+                "description": "零位行程和限位测试",
+                "callback": lambda: self.motion.zero_limit_travel_test(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
         }
         self.push_menu(menu, "基础功能测试")
 
