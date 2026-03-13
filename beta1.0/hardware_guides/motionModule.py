@@ -1156,7 +1156,42 @@ class MotionModule:
             print(f"    ✓ 限位已取消")
         except Exception as e:
             print(f"    ! 取消限位失败（可能不影响）: {e}")
-        
+
+        # ========== 准备步骤: 闭合到真正闭合位置 + 激光归零 ==========
+        print("\n" + "=" * 60)
+        print(">>> 准备步骤: 闭合到真正闭合位置（堵转检测）+ 激光归零")
+        print("=" * 60)
+        try:
+            true_close_pos = self._calibrate_gripper_climb_to_laser(
+                part=part,
+                pos_name=pos_name,
+                direction_sign=-1,
+                target_laser=0.0,
+                laser_tolerance=0.2,
+                target_speed=0.3,
+                ctrl_freq=100,
+                use_jam_detection=True,
+                jam_threshold=0.0001,
+                jam_count=50,
+            )
+            print(f"    ✓ 已到达真正闭合位置: {true_close_pos:.6f}")
+            self.g.loggerUI.info(f"[准备步骤] {part}: true_close_pos={true_close_pos:.6f}")
+        except Exception as e:
+            print(f"    ✗ 闭合到真正闭合位置失败: {e}")
+            self.g.loggerUI.error(f"[准备步骤] 闭合失败: {e}")
+            input("按回车返回")
+            return
+
+        try:
+            self.set_lasers_zero()
+            print("    ✓ 激光归零完成")
+            self.g.loggerUI.info(f"[准备步骤] {part}: laser set_zero done")
+        except Exception as e:
+            print(f"    ✗ 激光归零失败: {e}")
+            self.g.loggerUI.error(f"[准备步骤] 激光归零失败: {e}")
+            input("按回车返回")
+            return
+
         # ========== 步骤1: 寻找正向极限（全开） ==========
         print("\n" + "=" * 60)
         print(">>> 步骤1: 寻找正向极限（全开）")
