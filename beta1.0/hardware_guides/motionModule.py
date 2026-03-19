@@ -492,6 +492,200 @@ class MotionModule:
         except Exception as e:
             print(e)
 
+    def _run_step_record_once_auto(
+        self,
+        part: str,
+        pos_name: str,
+        target_pos: list,
+        timeout_s: float = 3.0,
+        threshold: float = 0.02,
+    ):
+        """Run one step response record without interactive prompts and return artifact paths."""
+        self.g.highfreq_log.clear()
+        self.g.lowfreq_log.clear()
+        self.g.feedback_mode = self.g.feedback_mode.BASIC
+
+        q_pos = [float(x) for x in target_pos]
+        reached = False
+        timed_out = False
+
+        try:
+            self.g.record_flag.set()
+            print(f"[自动阶跃] 开始记录，目标位置: {q_pos}")
+
+            start_time = time.monotonic()
+            while True:
+                with self.g.feedback_lock:
+                    cur_q = getattr(self.g.feedbackData, pos_name)
+                    rb_time = getattr(self.g.feedbackData, "rb_time")
+
+                if np.max(np.abs(np.array(cur_q) - np.array(q_pos))) <= TOL:
+                    reached = True
+                    print("[自动阶跃] 到达目标")
+                    self.g.loggerUI.info("[自动阶跃] 到达目标")
+                    break
+
+                if time.monotonic() - start_time > timeout_s:
+                    timed_out = True
+                    print(f"[自动阶跃] 超时退出: {timeout_s}s")
+                    self.g.loggerUI.warn(f"[自动阶跃] 超时退出: {timeout_s}s")
+                    break
+
+                self.g.robot.set_actions({part: {"type": "position", "position": q_pos}})
+                self.g.logger._record_lowfreq(
+                    t=time.perf_counter(),
+                    q=q_pos,
+                    rb_time=rb_time,
+                    feedback_pos=cur_q,
+                )
+                time.sleep(1 / CONTROL_HZ)
+
+            extra_record = time.perf_counter()
+            while time.perf_counter() - extra_record <= EXTRA_TIME:
+                with self.g.feedback_lock:
+                    cur_q = getattr(self.g.feedbackData, pos_name)
+                    rb_time = getattr(self.g.feedbackData, "rb_time")
+                self.g.logger._record_lowfreq(
+                    t=time.time(),
+                    q=q_pos,
+                    rb_time=rb_time,
+                    feedback_pos=cur_q,
+                )
+                time.sleep(1 / CONTROL_HZ)
+
+            highfreq_filename, lowfreq_filename, tstamp = self.g.logger._save_logs(part)
+            fig_name = f"viz_{tstamp}.png"
+            draw_step_response_analysis(
+                log_dir=f"{project_root}/logs",
+                lowfile=lowfreq_filename,
+                highfile=highfreq_filename,
+                savefig=fig_name,
+                target_pos=q_pos,
+                threshold=threshold,
+            )
+
+            return {
+                "target_pos": q_pos,
+                "reached": reached,
+                "timed_out": timed_out,
+                "highfreq_file": highfreq_filename,
+                "lowfreq_file": lowfreq_filename,
+                "plot_path": f"{project_root}/logs/{fig_name}",
+                "vel_plot_path": f"{project_root}/logs/vel_{fig_name}",
+            }
+        finally:
+            self.g.record_flag.clear()
+            self.g.feedback_mode = self.g.feedback_mode.FULL
+
+    def _write_step_response_report_xlsx(self, rows: list):
+        """
+        Write a new xlsx report and embed images.
+        columns: 目标位置 / 位置数据可视化 / 速度数据可视化
+        """
+        try:
+            from openpyxl import Workbook
+            from openpyxl.drawing.image import Image as XLImage
+        except ImportError as e:
+            raise RuntimeError("缺少依赖 openpyxl（以及其图像依赖 Pillow），请先安装后再运行。") from e
+
+        report_ts = time.strftime("%Y%m%d_%H%M%S")
+        report_path = f"{project_root}/logs/step_response_report_{report_ts}.xlsx"
+        os.makedirs(f"{project_root}/logs", exist_ok=True)
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "step_response"
+
+        ws["A1"] = "目标位置"
+        ws["B1"] = "位置数据可视化"
+        ws["C1"] = "速度数据可视化"
+        ws.column_dimensions["A"].width = 20
+        ws.column_dimensions["B"].width = 56
+        ws.column_dimensions["C"].width = 56
+
+        for idx, row in enumerate(rows, start=2):
+            ws.cell(row=idx, column=1, value=row["target_label"])
+            ws.row_dimensions[idx].height = 180
+
+            pos_img_path = row["plot_path"]
+            vel_img_path = row["vel_plot_path"]
+
+            if os.path.exists(pos_img_path):
+                pos_img = XLImage(pos_img_path)
+                pos_img.width = 380
+                pos_img.height = 210
+                pos_img.anchor = f"B{idx}"
+                ws.add_image(pos_img)
+            else:
+                ws.cell(row=idx, column=2, value=f"图片不存在: {pos_img_path}")
+
+            if os.path.exists(vel_img_path):
+                vel_img = XLImage(vel_img_path)
+                vel_img.width = 380
+                vel_img.height = 210
+                vel_img.anchor = f"C{idx}"
+                ws.add_image(vel_img)
+            else:
+                ws.cell(row=idx, column=3, value=f"图片不存在: {vel_img_path}")
+
+        wb.save(report_path)
+        return report_path
+
+    @hide_ui_while
+    def step_response_auto_test(self, part: str, pos_name: str):
+        """
+        基础功能测试-阶跃响应测试（自动化）:
+        两轮往返，共4条记录：
+        1) 0 -> 0.05
+        2) 0.05 -> 0
+        3) 0 -> 0.05
+        4) 0.05 -> 0
+        """
+        rounds = 2
+        settle_wait_s = 3.0
+        timeout_s = 3.0
+        threshold = 0.02
+        up_target = 0.05
+        down_target = 0.0
+        rows = []
+
+        print("=== 自动阶跃响应测试开始 ===")
+        self.g.loggerUI.info("自动阶跃响应测试开始")
+
+        for r in range(rounds):
+            print(f"[Round {r+1}/{rounds}] 先归零到 0.0")
+            zero_ok = self._move_to_target(part=part, pos_name=pos_name, target=0.0, timeout_s=timeout_s)
+            if not zero_ok:
+                self.g.loggerUI.warn(f"[Round {r+1}] 归零超时，继续执行后续测试")
+                print(f"[Round {r+1}] 归零超时，继续执行后续测试")
+            time.sleep(settle_wait_s)
+
+            up = self._run_step_record_once_auto(
+                part=part,
+                pos_name=pos_name,
+                target_pos=[up_target],
+                timeout_s=timeout_s,
+                threshold=threshold,
+            )
+            up["target_label"] = "0->0.05"
+            rows.append(up)
+            time.sleep(settle_wait_s)
+
+            down = self._run_step_record_once_auto(
+                part=part,
+                pos_name=pos_name,
+                target_pos=[down_target],
+                timeout_s=timeout_s,
+                threshold=threshold,
+            )
+            down["target_label"] = "0.05->0"
+            rows.append(down)
+            time.sleep(settle_wait_s)
+
+        report_path = self._write_step_response_report_xlsx(rows)
+        print(f"=== 自动阶跃响应测试结束，报告已生成: {report_path} ===")
+        self.g.loggerUI.info(f"自动阶跃响应测试结束，报告: {report_path}")
+
     @hide_ui_while
     def set_limits(self,part):
         min_pos = input("输入最小软限位:")

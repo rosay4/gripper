@@ -518,6 +518,13 @@ class GripperGuide(BaseGuide):
                     pos_name="gripper_pos",
                 ),
             },
+            "5": {
+                "description": "阶跃响应测试",
+                "callback": lambda: self.motion.step_response_auto_test(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
         }
         self.push_menu(menu, "基础功能测试")
 
