@@ -10,12 +10,15 @@ cur_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(cur_dir)
 # 新 FPS 格式
 FPS_PATTERN = re.compile(
-    r"\] INFO\s+Step time: .*?Average FPS:\s*(?P<fps>[0-9.]+).*?by (?P<device>[\w\-]+)"
+    r"INFO.*?Step time:.*?Average FPS:\s*(?P<fps>[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"
+    r"(?:.*?\bby\s+(?P<device>[\w\-]+))?",
+    re.IGNORECASE,
 )
 
 # Rate 格式
 RATE_PATTERN = re.compile(
-    r"INFO.*?rate=(?P<rate>[0-9.]+)%.*?by (?P<device>[\w\-]+)"
+    r"INFO.*?rate=(?P<rate>[0-9]+(?:\.[0-9]+)?)(?:%|\b)(?:.*?\bby\s+(?P<device>[\w\-]+))?",
+    re.IGNORECASE,
 )
 
 class HBlogBuffer:
@@ -62,7 +65,7 @@ class HBlogTailer(threading.Thread):
                         if m:
                             self.buffer.append({
                                 "type": "fps",
-                                "device": m.group("device").strip(),
+                                "device": (m.group("device") or "unknown").strip(),
                                 "fps": float(m.group("fps")),
                             })
                         # 解析 Rate
@@ -70,7 +73,7 @@ class HBlogTailer(threading.Thread):
                         if m:
                             self.buffer.append({
                                 "type": "rate",
-                                "device": m.group("device").strip(),
+                                "device": (m.group("device") or "unknown").strip(),
                                 "rate": float(m.group("rate")),
                             })
                         # 读原始日志

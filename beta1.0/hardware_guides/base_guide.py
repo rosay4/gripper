@@ -34,7 +34,8 @@ class BaseGuide(ABC):
         ## --- logger (UI safe) ---
         self.loggerUI = UILogger()
         self.hblog_buffer = HBlogBuffer()
-        self.hblog_tailer = HBlogTailer(path=f"{project_root}/logs/file.log",buffer=self.hblog_buffer)
+        self.hblog_log_path = self._resolve_hblog_log_path()
+        self.hblog_tailer = HBlogTailer(path=self.hblog_log_path,buffer=self.hblog_buffer)
         self.hblog_tailer.start()
 
         ## --- infra ---
@@ -46,6 +47,20 @@ class BaseGuide(ABC):
         self.record_flag = threading.Event()
         self.highfreq_log = []
         self.lowfreq_log = []
+
+    def _resolve_hblog_log_path(self):
+        # Some scripts use `logs/file.log` while others use `log/file.log`.
+        # Prefer an existing file and otherwise create the `logs` target.
+        candidates = [
+            f"{project_root}/logs/file.log",
+            f"{project_root}/log/file.log",
+        ]
+        for p in candidates:
+            if os.path.exists(p):
+                return p
+        default_path = candidates[0]
+        os.makedirs(os.path.dirname(default_path), exist_ok=True)
+        return default_path
     # --- lifecycle ---
     def run(self):
         self._load_config()

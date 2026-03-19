@@ -597,6 +597,7 @@ class GripperGuide(BaseGuide):
         self.push_menu(menu,"一维力传感器设零与标定")
 
 if __name__ == "__main__":
+    os.makedirs(f"{project_root}/logs", exist_ok=True)
     config = {
         "refresh_rate": "30 seconds",
         "appenders": {
