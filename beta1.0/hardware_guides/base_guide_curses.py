@@ -65,7 +65,7 @@ class HBlogTailer(threading.Thread):
                         if m:
                             self.buffer.append({
                                 "type": "fps",
-                                "device": (m.group("device") or "unknown").strip(),
+                                "device": (m.group("device") or "gripper").strip(),
                                 "fps": float(m.group("fps")),
                             })
                         # 解析 Rate
@@ -73,7 +73,7 @@ class HBlogTailer(threading.Thread):
                         if m:
                             self.buffer.append({
                                 "type": "rate",
-                                "device": (m.group("device") or "unknown").strip(),
+                                "device": (m.group("device") or "gripper").strip(),
                                 "rate": float(m.group("rate")),
                             })
                         # 读原始日志
