@@ -578,7 +578,12 @@ class MotionModule:
             self.g.record_flag.clear()
             self.g.feedback_mode = self.g.feedback_mode.FULL
 
-    def _write_step_response_report_xlsx(self, rows: list):
+    def _write_step_response_report_xlsx(
+        self,
+        rows: list,
+        report_prefix: str = "step_response_report",
+        second_col_title: str = "位置数据可视化",
+    ):
         """
         Write a new xlsx report and embed images.
         columns: 目标位置 / 位置数据可视化 / 速度数据可视化
@@ -601,7 +606,7 @@ class MotionModule:
             image_import_error = e
 
         report_ts = time.strftime("%Y%m%d_%H%M%S")
-        report_path = f"{project_root}/logs/step_response_report_{report_ts}.xlsx"
+        report_path = f"{project_root}/logs/{report_prefix}_{report_ts}.xlsx"
         os.makedirs(f"{project_root}/logs", exist_ok=True)
 
         wb = Workbook()
@@ -609,7 +614,7 @@ class MotionModule:
         ws.title = "step_response"
 
         ws["A1"] = "目标位置"
-        ws["B1"] = "位置数据可视化"
+        ws["B1"] = second_col_title
         ws["C1"] = "速度数据可视化"
         ws.column_dimensions["A"].width = 20
         ws.column_dimensions["B"].width = 56
@@ -656,6 +661,92 @@ class MotionModule:
 
         wb.save(report_path)
         return report_path
+
+    def _run_topp_record_once_auto(
+        self,
+        part: str,
+        pos_name: str,
+        target_pos: list,
+        timeout_s: float = 3.0,
+    ):
+        """
+        Run one TOPP trajectory tracking record without interactive prompts.
+        """
+        self.g.highfreq_log.clear()
+        self.g.lowfreq_log.clear()
+        self.g.feedback_mode = self.g.feedback_mode.BASIC
+
+        try:
+            with self.g.feedback_lock:
+                cur_q = getattr(self.g.feedbackData, pos_name)
+            start_point = np.array(cur_q, dtype=float)
+            end_point = np.array(target_pos, dtype=float)
+            dof = len(end_point)
+            path = np.vstack([start_point, end_point])
+
+            sample_rate = 20
+            step = 1 / sample_rate
+            max_vel = [float(self.max_vel)] * dof
+            max_acc = [float(self.max_acc)] * dof
+            try:
+                ts, qs, qds, qdds, duration = TOPP(path, max_vel, max_acc, step)
+            except RuntimeError as e:
+                self.g.loggerUI.error(f"[TOPP自动化] 轨迹规划失败: {e}")
+                raise
+
+            self.g.record_flag.set()
+            print(f"[TOPP自动化] 开始记录，目标位置: {end_point.tolist()}")
+            start_time = time.time()
+            for t, q in zip(ts, qs):
+                with self.g.feedback_lock:
+                    fb_q = getattr(self.g.feedbackData, pos_name)
+                    rb_time = getattr(self.g.feedbackData, "rb_time")
+                self.g.robot.set_actions({part: {"type": "position", "position": q.tolist()}})
+                self.g.logger._record_lowfreq(
+                    t=time.perf_counter(),
+                    q=q,
+                    rb_time=rb_time,
+                    feedback_pos=fb_q,
+                )
+                while time.time() - start_time < t:
+                    time.sleep(0.05)
+                if time.time() - start_time > timeout_s and t < ts[-1]:
+                    self.g.loggerUI.warn(f"[TOPP自动化] 执行超时 {timeout_s}s，提前结束")
+                    break
+
+            extra_record = time.perf_counter()
+            while time.perf_counter() - extra_record <= EXTRA_TIME:
+                with self.g.feedback_lock:
+                    fb_q = getattr(self.g.feedbackData, pos_name)
+                    rb_time = getattr(self.g.feedbackData, "rb_time")
+                self.g.logger._record_lowfreq(
+                    t=time.time(),
+                    q=end_point,
+                    rb_time=rb_time,
+                    feedback_pos=fb_q,
+                )
+                time.sleep(1 / CONTROL_HZ)
+
+            highfreq_filename, lowfreq_filename, tstamp = self.g.logger._save_logs(part)
+            fig_name = f"viz_{tstamp}.png"
+            draw(
+                log_dir=f"{project_root}/logs",
+                lowfile=lowfreq_filename,
+                highfile=highfreq_filename,
+                savefig=fig_name,
+                show_plot=False,
+            )
+
+            return {
+                "target_pos": end_point.tolist(),
+                "highfreq_file": highfreq_filename,
+                "lowfreq_file": lowfreq_filename,
+                "plot_path": f"{project_root}/logs/{fig_name}",
+                "vel_plot_path": f"{project_root}/logs/vel_{fig_name}",
+            }
+        finally:
+            self.g.record_flag.clear()
+            self.g.feedback_mode = self.g.feedback_mode.FULL
 
     @hide_ui_while
     def step_response_auto_test(self, part: str, pos_name: str):
@@ -711,6 +802,70 @@ class MotionModule:
         report_path = self._write_step_response_report_xlsx(rows)
         print(f"=== 自动阶跃响应测试结束，报告已生成: {report_path} ===")
         self.g.loggerUI.info(f"自动阶跃响应测试结束，报告: {report_path}")
+
+    @hide_ui_while
+    def topp_tracking_auto_test(self, part: str, pos_name: str):
+        """
+        基础功能测试-轨迹跟踪测试（自动化）:
+        两轮往返，共4条记录：
+        1) 0 -> 0.05
+        2) 0.05 -> 0
+        3) 0 -> 0.05
+        4) 0.05 -> 0
+        固定 TOPP 参数:
+        - max_vel = 0.1 rad/s
+        - max_acc = 1.0 rad/s^2
+        """
+        rounds = 2
+        settle_wait_s = 3.0
+        timeout_s = 3.0
+        up_target = 0.05
+        down_target = 0.0
+        rows = []
+
+        self.max_vel = 0.1
+        self.max_acc = 1.0
+        print("=== 自动轨迹跟踪测试开始 ===")
+        print(f"固定TOPP参数: max_vel={self.max_vel} rad/s, max_acc={self.max_acc} rad/s^2")
+        self.g.loggerUI.info(
+            f"自动轨迹跟踪测试开始，固定TOPP参数: max_vel={self.max_vel}, max_acc={self.max_acc}"
+        )
+
+        for r in range(rounds):
+            print(f"[Round {r+1}/{rounds}] 先归零到 0.0")
+            zero_ok = self._move_to_target(part=part, pos_name=pos_name, target=0.0, timeout_s=timeout_s)
+            if not zero_ok:
+                self.g.loggerUI.warn(f"[Round {r+1}] 归零超时，继续执行后续测试")
+                print(f"[Round {r+1}] 归零超时，继续执行后续测试")
+            time.sleep(settle_wait_s)
+
+            up = self._run_topp_record_once_auto(
+                part=part,
+                pos_name=pos_name,
+                target_pos=[up_target],
+                timeout_s=timeout_s,
+            )
+            up["target_label"] = "0->0.05"
+            rows.append(up)
+            time.sleep(settle_wait_s)
+
+            down = self._run_topp_record_once_auto(
+                part=part,
+                pos_name=pos_name,
+                target_pos=[down_target],
+                timeout_s=timeout_s,
+            )
+            down["target_label"] = "0.05->0"
+            rows.append(down)
+            time.sleep(settle_wait_s)
+
+        report_path = self._write_step_response_report_xlsx(
+            rows=rows,
+            report_prefix="topp_tracking_report",
+            second_col_title="位置及跟踪误差数据可视化",
+        )
+        print(f"=== 自动轨迹跟踪测试结束，报告已生成: {report_path} ===")
+        self.g.loggerUI.info(f"自动轨迹跟踪测试结束，报告: {report_path}")
 
     @hide_ui_while
     def set_limits(self,part):

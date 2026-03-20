@@ -525,6 +525,13 @@ class GripperGuide(BaseGuide):
                     pos_name="gripper_pos",
                 ),
             },
+            "6": {
+                "description": "轨迹跟踪测试",
+                "callback": lambda: self.motion.topp_tracking_auto_test(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
         }
         self.push_menu(menu, "基础功能测试")
 

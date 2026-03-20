@@ -81,7 +81,7 @@ def prepare_highfreq(highfreq):
         np.stack(temps)
     )
 
-def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig="viz_multi.png"):
+def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig="viz_multi.png", show_plot=True):
     log_dir = Path(log_dir)
     
     # 加载数据
@@ -223,6 +223,7 @@ def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig=
 
 
     # ===== 新图：温度（单通道）=====
+    fig_t = None
     if high_freq_temp.size > 0 and not np.all(np.isnan(high_freq_temp)):
         fig_t, axt = plt.subplots(figsize=(10, 4))
         axt.plot(rb_high - rb_high[0], high_freq_temp[:, 0], color='tab:red', linewidth=1.2, label="Temperature")
@@ -234,7 +235,13 @@ def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig=
         fig_t.savefig(temp_save_path, dpi=200, bbox_inches='tight')
         print(f"Saved temperature plot: {temp_save_path}")
 
-    plt.show()
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+        plt.close(fig_v)
+        if fig_t is not None:
+            plt.close(fig_t)
 
 def draw_wrench(log_dir=".", highfile="highfreq.json", savefig="viz_wrench.png"):
     """
