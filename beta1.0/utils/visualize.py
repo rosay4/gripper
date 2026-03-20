@@ -331,7 +331,8 @@ def draw_step_response_analysis(log_dir=".",
                                 highfile="highfreq.json",
                                 savefig="step_response.png",
                                 target_pos: list = [1.0],
-                                threshold=0.02):
+                                threshold=0.02,
+                                show_plot=True):
     """
     Step 阶跃响应分析，用于评估控制系统性能：
     - 超调量 (Overshoot)
@@ -454,7 +455,11 @@ def draw_step_response_analysis(log_dir=".",
     fig_v.savefig(vel_save_path, dpi=200, bbox_inches='tight')
     print(f"✅ 高频速度图已保存为 {vel_save_path}")
 
-    plt.show()
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+        plt.close(fig_v)
 
 
 if __name__ == "__main__":

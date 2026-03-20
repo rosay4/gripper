@@ -562,6 +562,7 @@ class MotionModule:
                 savefig=fig_name,
                 target_pos=q_pos,
                 threshold=threshold,
+                show_plot=False,
             )
 
             return {
@@ -584,9 +585,20 @@ class MotionModule:
         """
         try:
             from openpyxl import Workbook
-            from openpyxl.drawing.image import Image as XLImage
         except ImportError as e:
-            raise RuntimeError("缺少依赖 openpyxl（以及其图像依赖 Pillow），请先安装后再运行。") from e
+            raise RuntimeError(
+                f"缺少依赖 openpyxl。当前解释器: {sys.executable}，"
+                "请在该解释器对应环境安装: pip install openpyxl"
+            ) from e
+
+        image_embed_enabled = True
+        image_import_error = None
+        try:
+            from openpyxl.drawing.image import Image as XLImage
+        except Exception as e:
+            XLImage = None
+            image_embed_enabled = False
+            image_import_error = e
 
         report_ts = time.strftime("%Y%m%d_%H%M%S")
         report_path = f"{project_root}/logs/step_response_report_{report_ts}.xlsx"
@@ -603,6 +615,14 @@ class MotionModule:
         ws.column_dimensions["B"].width = 56
         ws.column_dimensions["C"].width = 56
 
+        if not image_embed_enabled:
+            warn_msg = (
+                "图片嵌入不可用（通常是缺少 Pillow），当前降级为写入图片路径。"
+                f" 错误: {image_import_error}"
+            )
+            print(warn_msg)
+            self.g.loggerUI.warn(warn_msg)
+
         for idx, row in enumerate(rows, start=2):
             ws.cell(row=idx, column=1, value=row["target_label"])
             ws.row_dimensions[idx].height = 180
@@ -610,23 +630,29 @@ class MotionModule:
             pos_img_path = row["plot_path"]
             vel_img_path = row["vel_plot_path"]
 
-            if os.path.exists(pos_img_path):
-                pos_img = XLImage(pos_img_path)
-                pos_img.width = 380
-                pos_img.height = 210
-                pos_img.anchor = f"B{idx}"
-                ws.add_image(pos_img)
+            if image_embed_enabled and os.path.exists(pos_img_path):
+                try:
+                    pos_img = XLImage(pos_img_path)
+                    pos_img.width = 380
+                    pos_img.height = 210
+                    pos_img.anchor = f"B{idx}"
+                    ws.add_image(pos_img)
+                except Exception as e:
+                    ws.cell(row=idx, column=2, value=f"插图失败，路径: {pos_img_path}, err: {e}")
             else:
-                ws.cell(row=idx, column=2, value=f"图片不存在: {pos_img_path}")
+                ws.cell(row=idx, column=2, value=pos_img_path if os.path.exists(pos_img_path) else f"图片不存在: {pos_img_path}")
 
-            if os.path.exists(vel_img_path):
-                vel_img = XLImage(vel_img_path)
-                vel_img.width = 380
-                vel_img.height = 210
-                vel_img.anchor = f"C{idx}"
-                ws.add_image(vel_img)
+            if image_embed_enabled and os.path.exists(vel_img_path):
+                try:
+                    vel_img = XLImage(vel_img_path)
+                    vel_img.width = 380
+                    vel_img.height = 210
+                    vel_img.anchor = f"C{idx}"
+                    ws.add_image(vel_img)
+                except Exception as e:
+                    ws.cell(row=idx, column=3, value=f"插图失败，路径: {vel_img_path}, err: {e}")
             else:
-                ws.cell(row=idx, column=3, value=f"图片不存在: {vel_img_path}")
+                ws.cell(row=idx, column=3, value=vel_img_path if os.path.exists(vel_img_path) else f"图片不存在: {vel_img_path}")
 
         wb.save(report_path)
         return report_path
