@@ -131,13 +131,23 @@ class MotionModule:
     def detect_mechanical_limit_by_stall(
         self,
         delta_history: deque,
+        pos_history: deque,
         threshold: float,
         consecutive_count: int,
+        window_motion_threshold: float,
     ) -> bool:
         if consecutive_count <= 0 or len(delta_history) < consecutive_count:
             return False
-        tail = list(delta_history)[-consecutive_count:]
-        return all((v is not None) and (v <= threshold) for v in tail)
+
+        tail_delta = list(delta_history)[-consecutive_count:]
+        if not all((v is not None) and (v <= threshold) for v in tail_delta):
+            return False
+
+        if len(pos_history) < (consecutive_count + 1):
+            return False
+        tail_pos = list(pos_history)[-(consecutive_count + 1):]
+        motion_span = max(tail_pos) - min(tail_pos)
+        return motion_span <= window_motion_threshold
 
     def _format_timestamp_ms(self):
         now = time.time()
@@ -151,10 +161,12 @@ class MotionModule:
         step_rad: float = 0.0001,
         settle_delay_s: float = 1.0,
         control_interval_s: float = 0.0,
-        stall_delta_threshold: float = 1e-4,
-        stall_consecutive_required: int = 8,
+        stall_delta_threshold: float = 5e-5,
+        stall_consecutive_required: int = 20,
+        stall_window_motion_threshold: float = 2e-4,
+        min_steps_before_stall: int = 60,
         max_steps: int = 20000,
-        max_duration_s: float = 180.0,
+        max_duration_s: float = 0.0,
         csv_path: str = None,
     ):
         direction = str(direction).strip().lower()
@@ -177,6 +189,7 @@ class MotionModule:
         step_index = 0
         prev_actual_pos = None
         delta_history = deque(maxlen=max(1, int(stall_consecutive_required)))
+        pos_history = deque(maxlen=max(2, int(stall_consecutive_required) + 1))
         stop_reason = "running"
 
         print("=== 开始夹爪标定数据采集 ===")
@@ -187,7 +200,7 @@ class MotionModule:
         while True:
             loop_start = time.monotonic()
             elapsed = loop_start - start_t
-            if step_index >= max_steps or elapsed >= max_duration_s:
+            if step_index >= max_steps or ((max_duration_s is not None) and float(max_duration_s) > 0 and elapsed >= float(max_duration_s)):
                 stop_reason = "timeout"
                 break
 
@@ -208,6 +221,8 @@ class MotionModule:
             actual_pos = sample["gripper_pos"]
 
             delta_pos = None
+            if actual_pos is not None:
+                pos_history.append(float(actual_pos))
             if (prev_actual_pos is not None) and (actual_pos is not None):
                 delta_pos = abs(float(actual_pos) - float(prev_actual_pos))
                 delta_history.append(delta_pos)
@@ -216,10 +231,12 @@ class MotionModule:
             if actual_pos is None:
                 row_reason = "invalid_feedback"
                 stop_reason = "invalid_feedback"
-            elif self.detect_mechanical_limit_by_stall(
+            elif (step_index >= int(min_steps_before_stall)) and self.detect_mechanical_limit_by_stall(
                 delta_history=delta_history,
+                pos_history=pos_history,
                 threshold=float(stall_delta_threshold),
                 consecutive_count=int(stall_consecutive_required),
+                window_motion_threshold=float(stall_window_motion_threshold),
             ):
                 row_reason = "stall_limit"
                 stop_reason = "stall_limit"
@@ -3538,6 +3555,10 @@ class MotionModule:
         finally:
             plt.ioff()
             plt.close(fig)
+
+
+
+
 
 
 
