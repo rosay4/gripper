@@ -149,8 +149,8 @@ class MotionModule:
         pos_name: str = "gripper_pos",
         direction: str = "open",
         step_rad: float = 0.0005,
-        settle_delay_s: float = 0.12,
-        control_interval_s: float = 0.10,
+        settle_delay_s: float = 1.0,
+        control_interval_s: float = 0.0,
         stall_delta_threshold: float = 1e-4,
         stall_consecutive_required: int = 8,
         max_steps: int = 20000,
@@ -201,7 +201,8 @@ class MotionModule:
             self.g.robot.set_actions({part: {"type": "position", "position": [command_pos]}})
 
             if settle_delay_s > 0:
-                time.sleep(settle_delay_s)
+                # 每步位移后保持1s（默认）让激光和机构稳定
+                self._hold_position_command(part=part, target=command_pos, hold_s=settle_delay_s)
 
             sample = self.safe_get_feedback_snapshot(pos_name=pos_name)
             actual_pos = sample["gripper_pos"]
@@ -248,10 +249,8 @@ class MotionModule:
             if row_reason != "running":
                 break
 
-            loop_spent = time.monotonic() - loop_start
-            remain = float(control_interval_s) - loop_spent
-            if remain > 0:
-                time.sleep(remain)
+            if control_interval_s > 0:
+                time.sleep(control_interval_s)
 
         final_sample = self.safe_get_feedback_snapshot(pos_name=pos_name)
         hold_pos = final_sample["gripper_pos"]
@@ -3527,6 +3526,8 @@ class MotionModule:
         finally:
             plt.ioff()
             plt.close(fig)
+
+
 
 
 
