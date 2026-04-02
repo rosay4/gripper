@@ -14,6 +14,7 @@ from collections import deque
 import threading
 import matplotlib.pyplot as plt
 import yaml
+from uuid import uuid4
 MAX_POINTS = 1000
 CONTROL_HZ = 20
 TOL = 1e-3
@@ -78,6 +79,219 @@ class MotionModule:
         with self.g.feedback_lock:
             raw = getattr(self.g.feedbackData, name, None)
         return self._coerce_scalar(raw)
+
+
+    def safe_get_feedback_snapshot(self, pos_name: str = "gripper_pos"):
+        with self.g.feedback_lock:
+            fb = self.g.feedbackData
+            snapshot = {
+                "gripper_pos": self._coerce_scalar(getattr(fb, pos_name, None)),
+                "gripper_vel": self._coerce_scalar(getattr(fb, "gripper_vel", None)),
+                "gripper_torque": self._coerce_scalar(getattr(fb, "gripper_torque", None)),
+                "real_distance": self._coerce_scalar(getattr(fb, "real_distance", None)),
+                "rb_time": self._coerce_scalar(getattr(fb, "rb_time", None)),
+                "laser_status": getattr(fb, "laser_status", None),
+            }
+        return snapshot
+
+    def _calibration_csv_headers(self):
+        return [
+            "timestamp",
+            "run_id",
+            "gripper_name",
+            "direction",
+            "step_index",
+            "command_pos_rad",
+            "gripper_pos",
+            "gripper_opening_distance",
+            "gripper opening distance",
+            "distance",
+            "delta_pos_from_prev",
+            "gripper_vel",
+            "gripper_torque",
+            "rb_time",
+            "laser_status",
+            "limit_reason",
+        ]
+
+    def append_csv_row(self, csv_path: str, row_dict: dict):
+        headers = self._calibration_csv_headers()
+        csv_dir = os.path.dirname(csv_path)
+        if csv_dir:
+            os.makedirs(csv_dir, exist_ok=True)
+        file_exists = os.path.exists(csv_path)
+        write_header = (not file_exists) or os.path.getsize(csv_path) == 0
+
+        with open(csv_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            if write_header:
+                writer.writeheader()
+            writer.writerow({k: row_dict.get(k) for k in headers})
+
+    def detect_mechanical_limit_by_stall(
+        self,
+        delta_history: deque,
+        threshold: float,
+        consecutive_count: int,
+    ) -> bool:
+        if consecutive_count <= 0 or len(delta_history) < consecutive_count:
+            return False
+        tail = list(delta_history)[-consecutive_count:]
+        return all((v is not None) and (v <= threshold) for v in tail)
+
+    def _format_timestamp_ms(self):
+        now = time.time()
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)) + f".{int((now % 1) * 1000):03d}"
+
+    def collect_gripper_calibration_data(
+        self,
+        part: str,
+        pos_name: str = "gripper_pos",
+        direction: str = "open",
+        step_rad: float = 0.0005,
+        settle_delay_s: float = 0.12,
+        control_interval_s: float = 0.10,
+        stall_delta_threshold: float = 1e-4,
+        stall_consecutive_required: int = 8,
+        max_steps: int = 20000,
+        max_duration_s: float = 180.0,
+        csv_path: str = None,
+    ):
+        direction = str(direction).strip().lower()
+        if direction not in ("open", "close"):
+            raise ValueError("direction must be 'open' or 'close'")
+        if step_rad <= 0:
+            raise ValueError("step_rad must be > 0")
+
+        if csv_path is None:
+            csv_path = os.path.join(project_root, "logs", "gripper_calibration_dataset.csv")
+
+        try:
+            self.g.robot.send_command(part, {"command": "set_control_mode", "mode": "position"})
+        except Exception:
+            pass
+
+        direction_sign = 1.0 if direction == "open" else -1.0
+        run_id = f"{time.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
+        start_t = time.monotonic()
+        step_index = 0
+        prev_actual_pos = None
+        delta_history = deque(maxlen=max(1, int(stall_consecutive_required)))
+        stop_reason = "running"
+
+        print("=== 开始夹爪标定数据采集 ===")
+        print(f"run_id: {run_id}")
+        print(f"direction: {direction}, step_rad: {step_rad}, settle_delay_s: {settle_delay_s}")
+        print(f"csv: {csv_path}")
+
+        while True:
+            loop_start = time.monotonic()
+            elapsed = loop_start - start_t
+            if step_index >= max_steps or elapsed >= max_duration_s:
+                stop_reason = "timeout"
+                break
+
+            current = self.safe_get_feedback_snapshot(pos_name=pos_name)
+            current_pos = current["gripper_pos"]
+            if current_pos is None:
+                stop_reason = "invalid_feedback"
+                break
+
+            command_pos = float(current_pos) + direction_sign * float(step_rad)
+            self.g.robot.set_actions({part: {"type": "position", "position": [command_pos]}})
+
+            if settle_delay_s > 0:
+                time.sleep(settle_delay_s)
+
+            sample = self.safe_get_feedback_snapshot(pos_name=pos_name)
+            actual_pos = sample["gripper_pos"]
+
+            delta_pos = None
+            if (prev_actual_pos is not None) and (actual_pos is not None):
+                delta_pos = abs(float(actual_pos) - float(prev_actual_pos))
+                delta_history.append(delta_pos)
+
+            row_reason = "running"
+            if actual_pos is None:
+                row_reason = "invalid_feedback"
+                stop_reason = "invalid_feedback"
+            elif self.detect_mechanical_limit_by_stall(
+                delta_history=delta_history,
+                threshold=float(stall_delta_threshold),
+                consecutive_count=int(stall_consecutive_required),
+            ):
+                row_reason = "stall_limit"
+                stop_reason = "stall_limit"
+
+            row = {
+                "timestamp": self._format_timestamp_ms(),
+                "run_id": run_id,
+                "gripper_name": part,
+                "direction": direction,
+                "step_index": step_index,
+                "command_pos_rad": command_pos,
+                "gripper_pos": actual_pos,
+                "gripper_opening_distance": sample["real_distance"],
+                "gripper opening distance": sample["real_distance"],
+                "distance": sample["real_distance"],
+                "delta_pos_from_prev": delta_pos,
+                "gripper_vel": sample["gripper_vel"],
+                "gripper_torque": sample["gripper_torque"],
+                "rb_time": sample["rb_time"],
+                "laser_status": sample["laser_status"],
+                "limit_reason": row_reason,
+            }
+            self.append_csv_row(csv_path=csv_path, row_dict=row)
+            step_index += 1
+            prev_actual_pos = actual_pos
+
+            if row_reason != "running":
+                break
+
+            loop_spent = time.monotonic() - loop_start
+            remain = float(control_interval_s) - loop_spent
+            if remain > 0:
+                time.sleep(remain)
+
+        final_sample = self.safe_get_feedback_snapshot(pos_name=pos_name)
+        hold_pos = final_sample["gripper_pos"]
+        if hold_pos is None:
+            hold_pos = prev_actual_pos
+        if hold_pos is not None:
+            try:
+                self.g.robot.set_actions({part: {"type": "position", "position": [float(hold_pos)]}})
+            except Exception:
+                pass
+
+        print(f"采集结束: reason={stop_reason}, steps={step_index}")
+        print(f"数据已写入: {csv_path}")
+        self.g.loggerUI.info(
+            f"gripper calibration done: run_id={run_id}, direction={direction}, reason={stop_reason}, steps={step_index}, csv={csv_path}"
+        )
+
+        return {
+            "run_id": run_id,
+            "csv_path": csv_path,
+            "direction": direction,
+            "steps": step_index,
+            "limit_reason": stop_reason,
+        }
+
+    @hide_ui_while
+    def run_open_calibration(self, part: str, pos_name: str = "gripper_pos"):
+        return self.collect_gripper_calibration_data(
+            part=part,
+            pos_name=pos_name,
+            direction="open",
+        )
+
+    @hide_ui_while
+    def run_close_calibration(self, part: str, pos_name: str = "gripper_pos"):
+        return self.collect_gripper_calibration_data(
+            part=part,
+            pos_name=pos_name,
+            direction="close",
+        )
 
     def _hold_position_command(self, part: str, target: float, hold_s: float):
         end_t = time.monotonic() + hold_s
@@ -3313,4 +3527,12 @@ class MotionModule:
         finally:
             plt.ioff()
             plt.close(fig)
+
+
+
+
+
+
+
+
 

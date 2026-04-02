@@ -586,6 +586,20 @@ class GripperGuide(BaseGuide):
                 "description": "【阶段1】激光测距仪归零",
                 "callback": self.motion.set_lasers_zero,
             },
+            "9": {
+                "description": "【MLP数据】步进采集-张开方向(open)",
+                "callback": lambda: self.motion.run_open_calibration(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
+            "10": {
+                "description": "【MLP数据】步进采集-闭合方向(close)",
+                "callback": lambda: self.motion.run_close_calibration(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
         }
         self.push_menu(menu, "夹爪参数自动矫正")
 
@@ -640,3 +654,4 @@ if __name__ == "__main__":
         "5":{"description":"基础功能测试","callback":guide.gripper_function_test},
     },"主菜单")
     guide.run()
+
