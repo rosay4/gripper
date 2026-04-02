@@ -243,6 +243,18 @@ class MotionModule:
                 "limit_reason": row_reason,
             }
             self.append_csv_row(csv_path=csv_path, row_dict=row)
+
+            # 每一步打印当前采样状态，便于在线观察采集质量
+            command_str = f"{command_pos:.6f}" if command_pos is not None else "None"
+            actual_str = f"{actual_pos:.6f}" if actual_pos is not None else "None"
+            laser_val = sample["real_distance"]
+            laser_str = f"{laser_val:.3f}" if laser_val is not None else "None"
+            delta_str = f"{delta_pos:.6f}" if delta_pos is not None else "None"
+            print(
+                f"[collect][{direction}] step={step_index:05d}, cmd={command_str}, "
+                f"pos={actual_str}, laser={laser_str}, dpos={delta_str}, reason={row_reason}"
+            )
+
             step_index += 1
             prev_actual_pos = actual_pos
 
@@ -3526,6 +3538,7 @@ class MotionModule:
         finally:
             plt.ioff()
             plt.close(fig)
+
 
 
 
