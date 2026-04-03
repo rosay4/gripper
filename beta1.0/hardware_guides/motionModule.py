@@ -158,7 +158,7 @@ class MotionModule:
         part: str,
         pos_name: str = "gripper_pos",
         direction: str = "open",
-        step_rad: float = 0.0003,
+        step_rad: float = 0.05,
         settle_delay_s: float = 1.0,
         control_interval_s: float = 0.0,
         stall_delta_threshold: float = 5e-5,
