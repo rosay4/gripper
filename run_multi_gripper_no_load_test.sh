@@ -40,9 +40,16 @@ fi
 echo "Using Python:"
 echo "  $ENV_PYTHON"
 if [[ -x "$PLOT_ENV_PYTHON" ]]; then
-    echo "Using plot Python:"
-    echo "  $PLOT_ENV_PYTHON"
-    PLOT_ARGS=(--plot-python "$PLOT_ENV_PYTHON")
+    if "$PLOT_ENV_PYTHON" -c "import matplotlib" >/dev/null 2>&1; then
+        echo "Using plot Python:"
+        echo "  $PLOT_ENV_PYTHON"
+        PLOT_ARGS=(--plot-python "$PLOT_ENV_PYTHON")
+    else
+        echo "Plot environment exists but matplotlib is missing:"
+        echo "  $PLOT_ENV_PYTHON"
+        echo "  Install it with: conda activate $PLOT_ENV_NAME && conda install matplotlib"
+        PLOT_ARGS=(--no-plot)
+    fi
 else
     echo "Plot environment not found, script will try fallback lookup:"
     echo "  $PLOT_ENV_PYTHON"

@@ -259,6 +259,7 @@ def run_plots(log_dir, saved_logs, plot_env: str, plot_python: str | None):
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError as exc:
             print(f"plot failed for {part}: {exc}")
+            print("check that the plot Python environment has matplotlib installed")
 
 
 def _find_conda_env_python(env_name: str):
