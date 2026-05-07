@@ -228,25 +228,31 @@ class MultiGripperNoLoadTest:
         return log_dir, saved
 
 
-def run_plots(log_dir, saved_logs, plot_env: str):
-    python_path = _find_conda_env_python(plot_env)
+def run_plots(log_dir, saved_logs, plot_env: str, plot_python: str | None):
+    python_path = Path(plot_python) if plot_python else _find_conda_env_python(plot_env)
     if python_path is None:
         print(f"plot skipped: conda env not found: {plot_env}")
         return
+    if not python_path.exists():
+        print(f"plot skipped: python not found: {python_path}")
+        return
 
-    plot_script = Path(cur_dir) / "plot_gripper_logs.py"
+    code = (
+        "import sys; "
+        f"sys.path.insert(0, {repr(folder_utils)}); "
+        "from visualize import draw; "
+        "draw(log_dir=sys.argv[1], lowfile=sys.argv[2], highfile=sys.argv[3], "
+        "savefig=sys.argv[4], show_plot=False)"
+    )
     for part, lowfile, highfile, savefig in saved_logs:
         print(f"plotting {part}: {savefig}")
         cmd = [
             str(python_path),
-            str(plot_script),
-            "--log-dir",
+            "-c",
+            code,
             str(log_dir),
-            "--lowfile",
             lowfile,
-            "--highfile",
             highfile,
-            "--savefig",
             savefig,
         ]
         try:
@@ -327,6 +333,10 @@ def parse_args():
         default="pyqt6_env",
         help="Conda environment used to generate plots.",
     )
+    parser.add_argument(
+        "--plot-python",
+        help="Python executable used to generate plots.",
+    )
     return parser.parse_args()
 
 
@@ -360,7 +370,12 @@ def main():
         )
         log_dir, saved_logs = test.save_logs()
         if not args.no_plot:
-            run_plots(log_dir=log_dir, saved_logs=saved_logs, plot_env=args.plot_env)
+            run_plots(
+                log_dir=log_dir,
+                saved_logs=saved_logs,
+                plot_env=args.plot_env,
+                plot_python=args.plot_python,
+            )
     finally:
         test.stop()
 

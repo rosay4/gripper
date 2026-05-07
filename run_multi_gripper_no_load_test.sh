@@ -3,6 +3,7 @@ set -e
 
 # -------- configuration --------
 ENV_NAME="gripper_test"
+PLOT_ENV_NAME="pyqt6_env"
 SCRIPT_NAME="beta1.0/hardware_guides/multi_gripper_no_load_test.py"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,6 +28,7 @@ else
 fi
 
 ENV_PYTHON="$CONDA_BASE/envs/$ENV_NAME/bin/python"
+PLOT_ENV_PYTHON="$CONDA_BASE/envs/$PLOT_ENV_NAME/bin/python"
 
 if [[ ! -x "$ENV_PYTHON" ]]; then
     echo "Conda environment not found or broken:"
@@ -37,6 +39,15 @@ fi
 
 echo "Using Python:"
 echo "  $ENV_PYTHON"
+if [[ -x "$PLOT_ENV_PYTHON" ]]; then
+    echo "Using plot Python:"
+    echo "  $PLOT_ENV_PYTHON"
+    PLOT_ARGS=(--plot-python "$PLOT_ENV_PYTHON")
+else
+    echo "Plot environment not found, script will try fallback lookup:"
+    echo "  $PLOT_ENV_PYTHON"
+    PLOT_ARGS=()
+fi
 echo
 
 # -------- run script --------
@@ -50,4 +61,4 @@ fi
 echo "Running: $SCRIPT_NAME"
 echo
 
-exec "$ENV_PYTHON" "$SCRIPT_NAME" "$@"
+exec "$ENV_PYTHON" "$SCRIPT_NAME" "${PLOT_ARGS[@]}" "$@"
