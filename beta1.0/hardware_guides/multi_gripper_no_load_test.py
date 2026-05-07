@@ -239,6 +239,8 @@ def run_plots(log_dir, saved_logs, plot_env: str, plot_python: str | None):
 
     code = (
         "import sys; "
+        "import matplotlib; "
+        "matplotlib.use('Agg'); "
         f"sys.path.insert(0, {repr(folder_utils)}); "
         "from visualize import draw; "
         "draw(log_dir=sys.argv[1], lowfile=sys.argv[2], highfile=sys.argv[3], "
@@ -256,10 +258,12 @@ def run_plots(log_dir, saved_logs, plot_env: str, plot_python: str | None):
             savefig,
         ]
         try:
-            subprocess.run(cmd, check=True)
+            env = os.environ.copy()
+            env["MPLBACKEND"] = "Agg"
+            subprocess.run(cmd, check=True, env=env)
         except subprocess.CalledProcessError as exc:
             print(f"plot failed for {part}: {exc}")
-            print("check that the plot Python environment has matplotlib installed")
+            print("check that the plot Python environment has matplotlib and a non-GUI backend available")
 
 
 def _find_conda_env_python(env_name: str):

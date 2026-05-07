@@ -40,7 +40,7 @@ fi
 echo "Using Python:"
 echo "  $ENV_PYTHON"
 if [[ -x "$PLOT_ENV_PYTHON" ]]; then
-    if "$PLOT_ENV_PYTHON" -c "import matplotlib" >/dev/null 2>&1; then
+    if MPLBACKEND=Agg "$PLOT_ENV_PYTHON" -c "import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot" >/dev/null 2>&1; then
         echo "Using plot Python:"
         echo "  $PLOT_ENV_PYTHON"
         PLOT_ARGS=(--plot-python "$PLOT_ENV_PYTHON")
