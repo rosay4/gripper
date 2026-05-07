@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -147,7 +148,12 @@ class MultiGripperNoLoadTest:
             with self.feedback_lock:
                 snapshot = {part: dict(self.feedback[part]) for part in PARTS}
             for part in PARTS:
-                self._record_lowfreq(part=part, target=end_pos, feedback=snapshot[part])
+                self._record_lowfreq(
+                    part=part,
+                    target=end_pos,
+                    feedback=snapshot[part],
+                    t_in_traj=time.perf_counter(),
+                )
             time.sleep(1.0 / CONTROL_HZ)
 
     def _move_all_to(self, target, timeout_s: float):
@@ -183,14 +189,20 @@ class MultiGripperNoLoadTest:
             self.robot.set_actions(action)
 
             for part in PARTS:
-                self._record_lowfreq(part=part, target=target, feedback=snapshot[part])
+                self._record_lowfreq(
+                    part=part,
+                    target=target,
+                    feedback=snapshot[part],
+                    t_in_traj=time.perf_counter(),
+                )
 
             time.sleep(1.0 / CONTROL_HZ)
 
-    def _record_lowfreq(self, part, target, feedback):
+    def _record_lowfreq(self, part, target, feedback, t_in_traj):
         self.lowfreq_log[part].append(
             {
                 "pc_time": time.time(),
+                "t_in_traj": t_in_traj,
                 "cmd_position": list(target),
                 "feedback_pos": _jsonable(feedback["position"]),
                 "rb_time": feedback["rb_time"],
@@ -201,6 +213,7 @@ class MultiGripperNoLoadTest:
         log_dir = Path(project_root) / "logs"
         log_dir.mkdir(exist_ok=True)
         tstamp = time.strftime("%Y%m%d_%H%M%S")
+        saved = []
 
         for part in PARTS:
             high_file = log_dir / f"highfreq_{tstamp}_{part}_multi_no_load.json"
@@ -211,6 +224,53 @@ class MultiGripperNoLoadTest:
                 json.dump(self.lowfreq_log[part], f, indent=2)
             print(f"saved: {high_file}")
             print(f"saved: {low_file}")
+            saved.append((part, low_file.name, high_file.name, f"viz_{tstamp}_{part}_multi_no_load.png"))
+        return log_dir, saved
+
+
+def run_plots(log_dir, saved_logs, plot_env: str):
+    python_path = _find_conda_env_python(plot_env)
+    if python_path is None:
+        print(f"plot skipped: conda env not found: {plot_env}")
+        return
+
+    plot_script = Path(cur_dir) / "plot_gripper_logs.py"
+    for part, lowfile, highfile, savefig in saved_logs:
+        print(f"plotting {part}: {savefig}")
+        cmd = [
+            str(python_path),
+            str(plot_script),
+            "--log-dir",
+            str(log_dir),
+            "--lowfile",
+            lowfile,
+            "--highfile",
+            highfile,
+            "--savefig",
+            savefig,
+        ]
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as exc:
+            print(f"plot failed for {part}: {exc}")
+
+
+def _find_conda_env_python(env_name: str):
+    candidates = []
+    conda_exe = os.environ.get("CONDA_EXE")
+    if conda_exe:
+        candidates.append(Path(conda_exe).resolve().parents[1] / "envs" / env_name / "bin" / "python")
+    home = Path.home()
+    candidates.extend(
+        [
+            home / "miniconda3" / "envs" / env_name / "bin" / "python",
+            home / "anaconda3" / "envs" / env_name / "bin" / "python",
+        ]
+    )
+    for candidate in candidates:
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 def _to_array(value):
@@ -257,6 +317,16 @@ def parse_args():
         action="store_true",
         help="Use defaults for omitted test parameters without prompting.",
     )
+    parser.add_argument(
+        "--no-plot",
+        action="store_true",
+        help="Skip plotting after logs are saved.",
+    )
+    parser.add_argument(
+        "--plot-env",
+        default="pyqt6_env",
+        help="Conda environment used to generate plots.",
+    )
     return parser.parse_args()
 
 
@@ -288,7 +358,9 @@ def main():
             repeat_count=repeat_count,
             timeout_s=timeout_s,
         )
-        test.save_logs()
+        log_dir, saved_logs = test.save_logs()
+        if not args.no_plot:
+            run_plots(log_dir=log_dir, saved_logs=saved_logs, plot_env=args.plot_env)
     finally:
         test.stop()
 
