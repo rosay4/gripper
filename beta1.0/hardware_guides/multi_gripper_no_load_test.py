@@ -66,8 +66,10 @@ class MultiGripperNoLoadTest:
 
     def start(self):
         config = self.build_config().get_data()
+        print("initializing robot...")
         self.robot = rb_python.robot.Robot(config)
-        self.robot.wait_for_operational(10)
+        print("robot initialized, waiting for grippers to become operational...")
+        self.wait_for_operational(timeout_s=10.0)
         time.sleep(1.0)
         self.feedback_thread = threading.Thread(target=self._feedback_loop, daemon=True)
         self.feedback_thread.start()
@@ -125,14 +127,42 @@ class MultiGripperNoLoadTest:
                     )
 
     def wait_for_initial_feedback(self, timeout_s: float = 5.0):
+        print("waiting for initial feedback...")
         start = time.monotonic()
         while time.monotonic() - start <= timeout_s:
             with self.feedback_lock:
                 ready = all(self.feedback[part]["position"] is not None for part in PARTS)
             if ready:
+                print("initial feedback received")
                 return True
             time.sleep(0.05)
         return False
+
+    def wait_for_operational(self, timeout_s: float):
+        start = time.monotonic()
+        last_print = 0.0
+        while time.monotonic() - start <= timeout_s:
+            status = self._get_robot_status()
+            ready = all(status.get(part) == "operational" for part in PARTS)
+            now = time.monotonic()
+            if now - last_print >= 1.0:
+                print(f"status: {status}")
+                last_print = now
+            if ready:
+                print("all grippers operational")
+                return
+            time.sleep(0.1)
+        self.print_robot_diagnostics()
+        raise RuntimeError(f"grippers did not become operational within {timeout_s}s")
+
+    def _get_robot_status(self):
+        try:
+            status = self.robot.get_status()
+        except Exception as exc:
+            return {"error": str(exc)}
+        if not isinstance(status, dict):
+            return {"raw": status}
+        return {part: status.get(part) for part in PARTS}
 
     def run_repetitive_test(self, start_pos, end_pos, repeat_count: int, timeout_s: float):
         targets = (start_pos, end_pos)
