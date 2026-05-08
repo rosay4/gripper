@@ -67,6 +67,7 @@ class MultiGripperNoLoadTest:
     def start(self):
         config = self.build_config().get_data()
         self.robot = rb_python.robot.Robot(config)
+        self.robot.wait_for_operational(10)
         time.sleep(1.0)
         self.feedback_thread = threading.Thread(target=self._feedback_loop, daemon=True)
         self.feedback_thread.start()
@@ -186,7 +187,11 @@ class MultiGripperNoLoadTest:
                 }
                 for part in PARTS
             }
-            self.robot.set_actions(action)
+            try:
+                self.robot.set_actions(action)
+            except RuntimeError as exc:
+                self.print_robot_diagnostics()
+                raise RuntimeError(f"set_actions failed for target {target}: {exc}") from exc
 
             for part in PARTS:
                 self._record_lowfreq(
@@ -226,6 +231,16 @@ class MultiGripperNoLoadTest:
             print(f"saved: {low_file}")
             saved.append((part, low_file.name, high_file.name, f"viz_{tstamp}_{part}_multi_no_load.png"))
         return log_dir, saved
+
+    def print_robot_diagnostics(self):
+        try:
+            print(f"robot status: {self.robot.get_status()}")
+        except Exception as exc:
+            print(f"robot status unavailable: {exc}")
+        try:
+            print(f"robot errors: {self.robot.get_errors()}")
+        except Exception as exc:
+            print(f"robot errors unavailable: {exc}")
 
 
 def run_plots(log_dir, saved_logs, plot_env: str, plot_python: str | None):
@@ -363,6 +378,8 @@ def main():
         raise ValueError("repeat count must be >= 1")
 
     test = MultiGripperNoLoadTest(config_dir=args.config_dir)
+    log_dir = None
+    saved_logs = []
     try:
         test.start()
         if not test.wait_for_initial_feedback():
@@ -381,6 +398,18 @@ def main():
                 plot_env=args.plot_env,
                 plot_python=args.plot_python,
             )
+    except Exception:
+        if any(test.highfreq_log[part] or test.lowfreq_log[part] for part in PARTS):
+            print("test interrupted or failed, saving collected logs")
+            log_dir, saved_logs = test.save_logs()
+            if not args.no_plot:
+                run_plots(
+                    log_dir=log_dir,
+                    saved_logs=saved_logs,
+                    plot_env=args.plot_env,
+                    plot_python=args.plot_python,
+                )
+        raise
     finally:
         test.stop()
 
