@@ -164,15 +164,21 @@ class MultiGripperNoLoadTest:
             return {"raw": status}
         return {part: status.get(part) for part in PARTS}
 
-    def run_repetitive_test(self, start_pos, end_pos, repeat_count: int, timeout_s: float):
+    def run_repetitive_test(self, start_pos, end_pos, repeat_count: int, timeout_s: float, dwell_s: float):
         targets = (start_pos, end_pos)
         print(f"start test: {PARTS}")
-        print(f"targets: {start_pos} <-> {end_pos}, repeats: {repeat_count}, timeout: {timeout_s}s")
+        print(
+            f"targets: {start_pos} <-> {end_pos}, repeats: {repeat_count}, "
+            f"timeout: {timeout_s}s, dwell: {dwell_s}s"
+        )
 
         for repeat_idx in range(repeat_count):
             print(f"cycle {repeat_idx + 1}/{repeat_count}")
             for target in targets:
-                self._move_all_to(target=target, timeout_s=timeout_s)
+                reached = self._move_all_to(target=target, timeout_s=timeout_s)
+                if reached and dwell_s > 0:
+                    print(f"  dwell {dwell_s}s before reversing")
+                    time.sleep(dwell_s)
 
         extra_start = time.perf_counter()
         while time.perf_counter() - extra_start <= EXTRA_RECORD_SEC:
@@ -203,12 +209,12 @@ class MultiGripperNoLoadTest:
 
             if all(reached.values()):
                 print(f"  reached: {target}")
-                return
+                return True
 
             if time.monotonic() - start_time > timeout_s:
                 pending = [part for part, ok in reached.items() if not ok]
                 print(f"  timeout after {timeout_s}s, pending: {pending}, target: {target}")
-                return
+                return False
 
             action = {
                 part: {
@@ -368,6 +374,7 @@ def parse_args():
     parser.add_argument("--end", type=float, help="End target position.")
     parser.add_argument("--count", type=int, help="Repeat count.")
     parser.add_argument("--timeout", type=float, help="Per-target timeout seconds.")
+    parser.add_argument("--dwell", type=float, help="Dwell seconds at each endpoint before reversing.")
     parser.add_argument(
         "--yes",
         action="store_true",
@@ -398,11 +405,13 @@ def main():
         end_pos = 0.05 if args.end is None else args.end
         repeat_count = 2000 if args.count is None else args.count
         timeout_s = 3.0 if args.timeout is None else args.timeout
+        dwell_s = 0.5 if args.dwell is None else args.dwell
     else:
         start_pos = args.start if args.start is not None else _prompt_float("start position", 0.0)
         end_pos = args.end if args.end is not None else _prompt_float("end position", 0.05)
         repeat_count = args.count if args.count is not None else _prompt_int("repeat count", 2000)
         timeout_s = args.timeout if args.timeout is not None else _prompt_float("timeout seconds", 3.0)
+        dwell_s = args.dwell if args.dwell is not None else _prompt_float("dwell seconds", 0.5)
 
     if repeat_count < 1:
         raise ValueError("repeat count must be >= 1")
@@ -419,6 +428,7 @@ def main():
             end_pos=[end_pos],
             repeat_count=repeat_count,
             timeout_s=timeout_s,
+            dwell_s=dwell_s,
         )
         log_dir, saved_logs = test.save_logs()
         if not args.no_plot:
