@@ -6,6 +6,7 @@ ENV_NAME="gripper_test"
 SCRIPT_NAME="beta1.0/hardware_guides/guide_gripper_ui.py"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CAN_INIT_SCRIPT="$SCRIPT_DIR/../env/init_socket_can.sh"
 
 echo "========================================"
 echo " Starting Gripper Guide UI"
@@ -14,7 +15,9 @@ echo
 
 # -------- locate conda base --------
 if [[ -z "$CONDA_EXE" ]]; then
-    if [[ -d "$HOME/miniconda3" ]]; then
+    if [[ -d "$HOME/miniforge3" ]]; then
+        CONDA_BASE="$HOME/miniforge3"
+    elif [[ -d "$HOME/miniconda3" ]]; then
         CONDA_BASE="$HOME/miniconda3"
     elif [[ -d "$HOME/anaconda3" ]]; then
         CONDA_BASE="$HOME/anaconda3"
@@ -39,6 +42,20 @@ echo "Using Python:"
 echo "  $ENV_PYTHON"
 echo
 
+# -------- initialize SocketCAN --------
+if [[ -f "$CAN_INIT_SCRIPT" ]]; then
+    echo "Initializing SocketCAN:"
+    echo "  $CAN_INIT_SCRIPT"
+    if [[ "$EUID" -eq 0 ]]; then
+        bash "$CAN_INIT_SCRIPT" || true
+    elif command -v sudo >/dev/null; then
+        sudo BITRATE="${CAN_BITRATE:-1000000}" TXQLEN="${CAN_TXQLEN:-65535}" bash "$CAN_INIT_SCRIPT" || true
+    else
+        echo "⚠️ sudo not found, skipping SocketCAN init"
+    fi
+    echo
+fi
+
 # -------- run script --------
 cd "$SCRIPT_DIR"
 
@@ -51,4 +68,3 @@ echo "Running: $SCRIPT_NAME"
 echo
 
 exec "$ENV_PYTHON" "$SCRIPT_NAME"
-
