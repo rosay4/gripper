@@ -127,8 +127,9 @@ class CursesUI:
         self.feedback_h = 16
         self.menu_h = 14
         self.hblog_h = 8
-        self.min_h = self.feedback_h + self.menu_h + self.hblog_h + 5
-        self.min_w = 80
+        self.log_h = 4
+        self.min_h = int(os.environ.get("GRIPPER_UI_MIN_H", 22))
+        self.min_w = int(os.environ.get("GRIPPER_UI_MIN_W", 72))
         ## 终端切换
         self.show_ui = True
         self._last_hidden_msg_time = 0.0
@@ -147,6 +148,37 @@ class CursesUI:
 
     def run(self):
         curses.wrapper(self._main)
+
+    def _apply_layout(self, height: int):
+        if height >= 40:
+            self.feedback_h = 16
+            self.menu_h = 14
+            self.hblog_h = 8
+        elif height >= 30:
+            self.feedback_h = 10
+            self.menu_h = 11
+            self.hblog_h = 5
+        else:
+            self.feedback_h = 8 if height >= 24 else 7
+            self.menu_h = 9 if height >= 24 else 8
+            self.hblog_h = 3
+
+        self.log_h = max(3, height - self.feedback_h - self.menu_h - self.hblog_h)
+        self.menu_items_per_page = max(2, self.menu_h - 6)
+
+    def _create_windows(self, stdscr):
+        H, W = stdscr.getmaxyx()
+        self._apply_layout(H)
+        log_y = self.feedback_h + self.menu_h
+        hblog_y = log_y + self.log_h
+        self.win_feedback = curses.newwin(self.feedback_h, W, 0, 0)
+        self.win_menu = curses.newwin(self.menu_h, W, self.feedback_h, 0)
+        self.win_menu.nodelay(True)
+        self.win_menu.keypad(True)
+        self.win_log = curses.newwin(self.log_h, W, log_y, 0)
+        self.win_hblog = curses.newwin(self.hblog_h, W, hblog_y, 0)
+        stdscr.clear()
+        stdscr.refresh()
 
     def _force_sync_term_size(self, stdscr):
         """强制同步 curses 内部尺寸，让 getmaxyx() 立刻更新"""
@@ -207,18 +239,7 @@ class CursesUI:
             return
 
         # ===== 进入正常 UI 初始化 =====
-        H, W = stdscr.getmaxyx()
-        log_h = H - self.feedback_h - self.menu_h - self.hblog_h
-
-        self.win_feedback = curses.newwin(self.feedback_h, W, 0, 0)
-        self.win_menu = curses.newwin(self.menu_h, W, self.feedback_h, 0)
-        self.win_menu.nodelay(True)
-        self.win_menu.keypad(True)
-        self.win_log = curses.newwin(log_h, W, self.feedback_h + self.menu_h, 0)
-        self.win_hblog = curses.newwin(self.hblog_h, W, self.feedback_h + self.menu_h + log_h, 0)
-
-        stdscr.clear()
-        stdscr.refresh()
+        self._create_windows(stdscr)
 
         while self.guide.running:
             # ✅ 运行中如果缩小窗口，也要回到等待模式
@@ -228,14 +249,7 @@ class CursesUI:
                 if not ok:
                     return
                 # ✅ 恢复后需要重新创建窗口（因为尺寸变了）
-                H, W = stdscr.getmaxyx()
-                log_h = H - self.feedback_h - self.menu_h - self.hblog_h
-                self.win_feedback = curses.newwin(self.feedback_h, W, 0, 0)
-                self.win_menu = curses.newwin(self.menu_h, W, self.feedback_h, 0)
-                self.win_log = curses.newwin(log_h, W, self.feedback_h + self.menu_h, 0)
-                self.win_hblog = curses.newwin(self.hblog_h, W, self.feedback_h + self.menu_h + log_h, 0)
-                stdscr.clear()
-                stdscr.refresh()
+                self._create_windows(stdscr)
                 continue
 
             # ===== 正常 UI 刷新 =====
@@ -478,16 +492,9 @@ class CursesUI:
                 curses.endwin()
         if key == '\n':
             self.show_ui = True
-            curses.initscr()
+            stdscr = curses.initscr()
             curses.curs_set(0)
-            H,W = curses.initscr().getmaxyx()
-            log_h = H - self.feedback_h - self.menu_h - self.hblog_h
-            self.win_feedback = curses.newwin(self.feedback_h, W, 0, 0)
-            self.win_menu = curses.newwin(self.menu_h, W, self.feedback_h, 0)
-            self.win_menu.nodelay(True)
-            self.win_menu.keypad(True)
-            self.win_log = curses.newwin(log_h, W, self.feedback_h + self.menu_h,0)
-            self.win_hblog = curses.newwin(self.hblog_h, W, self.feedback_h + self.menu_h + log_h, 0)
+            self._create_windows(stdscr)
             self._draw_feedback()
             self._draw_menu()
             self._draw_log()
@@ -579,16 +586,9 @@ class CursesUI:
         if not self.show_ui:
             if key == '\n':
                 self.show_ui = True
-                curses.initscr()
+                stdscr = curses.initscr()
                 curses.curs_set(0)
-                H,W = curses.initscr().getmaxyx()
-                log_h = H - self.feedback_h - self.menu_h - self.hblog_h
-                self.win_feedback = curses.newwin(self.feedback_h, W, 0, 0)
-                self.win_menu = curses.newwin(self.menu_h, W, self.feedback_h, 0)
-                self.win_menu.nodelay(True)
-                self.win_menu.keypad(True)
-                self.win_log = curses.newwin(log_h, W, self.feedback_h + self.menu_h,0)
-                self.win_hblog = curses.newwin(self.hblog_h, W, self.feedback_h + self.menu_h + log_h, 0)
+                self._create_windows(stdscr)
                 self._draw_feedback()
                 self._draw_menu()
                 self._draw_log()
