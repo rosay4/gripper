@@ -18,8 +18,9 @@ if [[ -t 1 ]]; then
     if [[ -n "${WINDOWID:-}" ]] && command -v xdotool >/dev/null 2>&1; then
         xdotool windowmove "$WINDOWID" 0 0 >/dev/null 2>&1 || true
         xdotool windowsize "$WINDOWID" 100% 100% >/dev/null 2>&1 || true
+        xdotool key F11 >/dev/null 2>&1 || true
     elif command -v wmctrl >/dev/null 2>&1; then
-        wmctrl -r :ACTIVE: -b add,maximized_vert,maximized_horz >/dev/null 2>&1 || true
+        wmctrl -r :ACTIVE: -b add,fullscreen,maximized_vert,maximized_horz >/dev/null 2>&1 || true
     fi
     printf '\033[9;1t\033[8;40;120t'
     sleep 0.2
@@ -61,7 +62,7 @@ if [[ -f "$CAN_INIT_SCRIPT" ]]; then
     if [[ "$EUID" -eq 0 ]]; then
         bash "$CAN_INIT_SCRIPT" || true
     elif command -v sudo >/dev/null; then
-        sudo BITRATE="${CAN_BITRATE:-1000000}" TXQLEN="${CAN_TXQLEN:-65535}" bash "$CAN_INIT_SCRIPT" || true
+        sudo -n bash "$CAN_INIT_SCRIPT" || sudo BITRATE="${CAN_BITRATE:-1000000}" TXQLEN="${CAN_TXQLEN:-65535}" bash "$CAN_INIT_SCRIPT" || true
     else
         echo "⚠️ sudo not found, skipping SocketCAN init"
     fi

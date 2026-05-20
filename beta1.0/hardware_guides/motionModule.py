@@ -815,6 +815,7 @@ class MotionModule:
                 "lowfreq_file": lowfreq_filename,
                 "plot_path": f"{project_root}/logs/{fig_name}",
                 "vel_plot_path": f"{project_root}/logs/vel_{fig_name}",
+                "temp_plot_path": f"{project_root}/logs/temp_{fig_name}",
             }
         finally:
             self.g.record_flag.clear()
@@ -926,7 +927,7 @@ class MotionModule:
                     self.g.loggerUI.warn(f"临时数据删除失败: {log_path}, err: {e}")
 
             if row.get("_report_images_embedded"):
-                for key in ("plot_path", "vel_plot_path"):
+                for key in ("plot_path", "vel_plot_path", "temp_plot_path"):
                     image_path = row.get(key)
                     if not image_path:
                         continue
@@ -1017,6 +1018,7 @@ class MotionModule:
                 "lowfreq_file": lowfreq_filename,
                 "plot_path": f"{project_root}/logs/{fig_name}",
                 "vel_plot_path": f"{project_root}/logs/vel_{fig_name}",
+                "temp_plot_path": f"{project_root}/logs/temp_{fig_name}",
             }
         finally:
             self.g.record_flag.clear()
@@ -3028,6 +3030,18 @@ class MotionModule:
     def get_limits(self,part):
         print("当前关节范围:",self.g.robot.send_command(part, {"command": "get_limit"}))
         input("回车以返回")
+
+    @hide_ui_while
+    def get_motor_sn(self, part: str):
+        commands = ("get_sn", "get_serial_number", "get_serial", "get_hardware_version")
+        for command in commands:
+            try:
+                result = self.g.robot.send_command(part, {"command": command})
+            except Exception as e:
+                print(f"{command}: failed ({e})")
+                continue
+            print(f"{command}: {result}")
+        input("回车返回")
 
     @hide_ui_while
     def zero_limit_travel_test(self, part: str, pos_name: str = "gripper_pos", wait_for_return: bool = True):

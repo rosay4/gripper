@@ -562,45 +562,51 @@ class GripperGuide(BaseGuide):
                 "callback": self.motion.set_manual_control_step,
             },
             "4": {
+                "description": "read: 尝试读取电机SN/序列号",
+                "callback": lambda: self.motion.get_motor_sn(
+                    part=self.selected_gripper,
+                ),
+            },
+            "5": {
                 "description": "reset: 重置yaml参数为默认值并加载",
                 "callback": lambda: self.motion.manual_calibration_reset_yaml_and_reload(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "5": {
+            "6": {
                 "description": "【参考已有完整流程】自动标定并设零",
                 "callback": lambda: self.motion.full_auto_calibration(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "6": {
+            "7": {
                 "description": "【阶段1】方案B: 自动张开到最大(记录rad1+laser)",
                 "callback": lambda: self.motion.auto_open_to_max(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "7": {
+            "8": {
                 "description": "【阶段1】方案B: 自动闭合(记录rad2+laser)",
                 "callback": lambda: self.motion.auto_close_to_min(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "8": {
+            "9": {
                 "description": "【阶段1】激光测距仪归零",
                 "callback": self.motion.set_lasers_zero,
             },
-            "9": {
+            "10": {
                 "description": "【MLP数据】步进采集-张开方向(open)",
                 "callback": lambda: self.motion.run_open_calibration(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "10": {
+            "11": {
                 "description": "【MLP数据】步进采集-闭合方向(close)",
                 "callback": lambda: self.motion.run_close_calibration(
                     part=self.selected_gripper,
