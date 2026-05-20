@@ -3,6 +3,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_CMD="cd \"$SCRIPT_DIR\" && bash run_guide_gripper_ui.sh"
+LAUNCHER_CMD="GRIPPER_LAUNCHED_TERMINAL=1 \"$SCRIPT_DIR/launch_guide_gripper_ui_terminal.sh\""
 
 if [[ "${GRIPPER_LAUNCHED_TERMINAL:-0}" == "1" ]]; then
     cd "$SCRIPT_DIR"
@@ -16,10 +17,10 @@ if [[ "${GRIPPER_LAUNCHED_TERMINAL:-0}" == "1" ]]; then
 fi
 
 if command -v gnome-terminal >/dev/null 2>&1; then
-    exec gnome-terminal --full-screen -- bash -lc "export GRIPPER_LAUNCHED_TERMINAL=1; $RUN_CMD"
+    exec gnome-terminal --full-screen -- bash -lc "$LAUNCHER_CMD"
 elif command -v x-terminal-emulator >/dev/null 2>&1; then
-    exec x-terminal-emulator -e bash -lc "export GRIPPER_LAUNCHED_TERMINAL=1; $RUN_CMD"
+    exec x-terminal-emulator -e bash -lc "$LAUNCHER_CMD"
 else
     export GRIPPER_LAUNCHED_TERMINAL=1
-    exec bash -lc "$RUN_CMD"
+    exec bash -lc "\"$SCRIPT_DIR/launch_guide_gripper_ui_terminal.sh\""
 fi
