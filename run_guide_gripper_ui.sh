@@ -13,6 +13,18 @@ echo " Starting Gripper Guide UI"
 echo "========================================"
 echo
 
+# -------- maximize terminal when possible --------
+if [[ -t 1 ]]; then
+    if [[ -n "${WINDOWID:-}" ]] && command -v xdotool >/dev/null 2>&1; then
+        xdotool windowmove "$WINDOWID" 0 0 >/dev/null 2>&1 || true
+        xdotool windowsize "$WINDOWID" 100% 100% >/dev/null 2>&1 || true
+    elif command -v wmctrl >/dev/null 2>&1; then
+        wmctrl -r :ACTIVE: -b add,maximized_vert,maximized_horz >/dev/null 2>&1 || true
+    fi
+    printf '\033[9;1t\033[8;40;120t'
+    sleep 0.2
+fi
+
 # -------- locate conda base --------
 if [[ -z "$CONDA_EXE" ]]; then
     if [[ -d "$HOME/miniforge3" ]]; then

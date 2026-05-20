@@ -128,8 +128,8 @@ class CursesUI:
         self.menu_h = 14
         self.hblog_h = 8
         self.log_h = 4
-        self.min_h = int(os.environ.get("GRIPPER_UI_MIN_H", 22))
-        self.min_w = int(os.environ.get("GRIPPER_UI_MIN_W", 72))
+        self.min_h = int(os.environ.get("GRIPPER_UI_MIN_H", 30))
+        self.min_w = int(os.environ.get("GRIPPER_UI_MIN_W", 90))
         ## 终端切换
         self.show_ui = True
         self._last_hidden_msg_time = 0.0

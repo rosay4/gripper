@@ -910,19 +910,31 @@ class MotionModule:
         wb.save(report_path)
         return report_path
 
-    def _cleanup_report_images(self, rows: list):
+    def _cleanup_report_artifacts(self, rows: list):
+        log_dir = os.path.join(project_root, "logs")
         for row in rows:
-            if not row.get("_report_images_embedded"):
-                continue
-            for key in ("plot_path", "vel_plot_path"):
-                image_path = row.get(key)
-                if not image_path:
+            for key in ("highfreq_file", "lowfreq_file"):
+                log_path = row.get(key)
+                if not log_path:
                     continue
+                if not os.path.isabs(log_path):
+                    log_path = os.path.join(log_dir, log_path)
                 try:
-                    if os.path.exists(image_path):
-                        os.remove(image_path)
+                    if os.path.exists(log_path):
+                        os.remove(log_path)
                 except OSError as e:
-                    self.g.loggerUI.warn(f"临时图片删除失败: {image_path}, err: {e}")
+                    self.g.loggerUI.warn(f"临时数据删除失败: {log_path}, err: {e}")
+
+            if row.get("_report_images_embedded"):
+                for key in ("plot_path", "vel_plot_path"):
+                    image_path = row.get(key)
+                    if not image_path:
+                        continue
+                    try:
+                        if os.path.exists(image_path):
+                            os.remove(image_path)
+                    except OSError as e:
+                        self.g.loggerUI.warn(f"临时图片删除失败: {image_path}, err: {e}")
 
     def _run_topp_record_once_auto(
         self,
@@ -1062,7 +1074,7 @@ class MotionModule:
             time.sleep(settle_wait_s)
 
         report_path = self._write_step_response_report_xlsx(rows)
-        self._cleanup_report_images(rows)
+        self._cleanup_report_artifacts(rows)
         print(f"=== 自动阶跃响应测试结束，报告已生成: {report_path} ===")
         self.g.loggerUI.info(f"自动阶跃响应测试结束，报告: {report_path}")
 
@@ -1127,7 +1139,7 @@ class MotionModule:
             report_prefix="topp_tracking_report",
             second_col_title="位置及跟踪误差数据可视化",
         )
-        self._cleanup_report_images(rows)
+        self._cleanup_report_artifacts(rows)
         print(f"=== 自动轨迹跟踪测试结束，报告已生成: {report_path} ===")
         self.g.loggerUI.info(f"自动轨迹跟踪测试结束，报告: {report_path}")
 
@@ -2767,6 +2779,7 @@ class MotionModule:
         if wait_for_return:
             input("回车返回")
 
+    @hide_ui_while
     def one_dim_force_accuracy_test(self, part: str, wait_for_return: bool = True):
         gripper_part = getattr(self.g, "selected_gripper", None)
         if not gripper_part:
@@ -2781,27 +2794,28 @@ class MotionModule:
         self.manual_control_step = 0.00001
         rows = []
 
-        self.g.loggerUI.info("开始一维力精度测试")
-        self.g.loggerUI.info(f"先移动夹爪到 {start_pos:.6f}")
+        print("=== 一维力精度测试 ===")
+        print(f"1. 自动移动夹爪到 {start_pos:.6f}")
         ok = self._move_to_target(part=gripper_part, pos_name="gripper_pos", target=start_pos, timeout_s=5.0)
         if not ok:
             self.g.loggerUI.warn(f"一维力精度测试: 移动到 {start_pos:.6f} 超时，继续进入点按采样")
+            print(f"移动到 {start_pos:.6f} 超时，继续进入点按采样")
 
         try:
-            self.g.loggerUI.info("点按模式: W/S 微调夹爪，R 记录推拉力计读数，Q 退出")
-            self.g.loggerUI.info(f"点按步长: {self.manual_control_step:.5f}")
+            print()
+            print("2. 点按模式")
+            print("   W: 张开方向微调")
+            print("   S: 闭合方向微调")
+            print("   R: 输入当前数显推拉力计读数并记录夹爪一维力通道0/1")
+            print("   Q: 退出测试")
+            print(f"   点按步长: {self.manual_control_step:.5f}")
+            print(f"   需要记录 {sample_count} 次。按 W/S/R/Q 操作，W/S 不会回显到终端。")
+            print()
             while len(rows) < sample_count:
-                ch = None
-                try:
-                    ch = self.g.ui.win_menu.getch()
-                except Exception:
-                    ch = -1
-
-                if ch == -1:
-                    time.sleep(0.02)
+                key = self._read_hidden_terminal_key()
+                if key is None:
                     continue
 
-                key = chr(ch).lower()
                 if key in ("w", "s"):
                     current = self._get_feedback_scalar("gripper_pos")
                     if current is None:
@@ -2810,8 +2824,9 @@ class MotionModule:
                     direction = 1.0 if key == "w" else -1.0
                     new_pos = current + direction * self.manual_control_step
                     self.g.robot.set_actions({gripper_part: {"type": "position", "position": [new_pos]}})
-                    self.g.loggerUI.info(f"一维力精度点按: {current:.6f} -> {new_pos:.6f}")
+                    print(f"\r当前位置 {current:.6f} -> 目标 {new_pos:.6f}    ", end="", flush=True)
                 elif key == "r":
+                    print()
                     gauge_value = self._prompt_one_dim_force_gauge_value(
                         sample_index=len(rows) + 1,
                         sample_count=sample_count,
@@ -2823,9 +2838,9 @@ class MotionModule:
                     ch0 = self._coerce_scalar(force_tip[0] if len(force_tip) > 0 else None)
                     ch1 = self._coerce_scalar(force_tip[1] if len(force_tip) > 1 else None)
                     rows.append([gauge_value, ch0, ch1])
-                    self.g.loggerUI.info(f"已记录 {len(rows)}/{sample_count}: 推拉力计={gauge_value}, 通道0={ch0}, 通道1={ch1}")
+                    print(f"已记录 {len(rows)}/{sample_count}: 推拉力计={gauge_value}, 通道0={ch0}, 通道1={ch1}")
                 elif key == "q":
-                    self.g.loggerUI.info("一维力精度测试已退出")
+                    print("\n一维力精度测试已退出")
                     return
 
             out_dir = os.path.join(project_root, "logs")
@@ -2842,34 +2857,46 @@ class MotionModule:
                 writer.writerows(rows)
 
             self.g.loggerUI.info(f"一维力精度测试完成, CSV: {out_file}")
+            print(f"\n一维力精度测试完成, CSV: {out_file}")
         finally:
             self.manual_control_step = old_step
             if wait_for_return:
-                self._prompt_return_to_ui("一维力精度测试结束，回车返回")
+                input("一维力精度测试结束，回车返回")
+
+    def _read_hidden_terminal_key(self):
+        try:
+            import select
+            import termios
+            import tty
+        except ImportError:
+            raw = input("请输入操作键 W/S/R/Q: ").strip().lower()
+            return raw[:1] if raw else None
+
+        fd = sys.stdin.fileno()
+        old_attrs = termios.tcgetattr(fd)
+        new_attrs = termios.tcgetattr(fd)
+        new_attrs[3] = new_attrs[3] & ~(termios.ECHO | termios.ICANON)
+        new_attrs[6][termios.VMIN] = 0
+        new_attrs[6][termios.VTIME] = 1
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, new_attrs)
+            ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+            if not ready:
+                return None
+            ch = sys.stdin.read(1)
+            return ch.lower() if ch else None
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
 
     def _prompt_one_dim_force_gauge_value(self, sample_index: int, sample_count: int):
-        raw = self._prompt_return_to_ui(
-            f"请输入第 {sample_index}/{sample_count} 次数显推拉力计读数(N): "
-        ).strip()
+        raw = input(f"请输入第 {sample_index}/{sample_count} 次数显推拉力计读数(N): ").strip()
         if not raw:
             return None
         try:
             return float(raw)
         except ValueError:
-            self.g.loggerUI.warn("输入无效，请按 R 重新记录并输入数字")
+            print("输入无效，请按 R 重新记录并输入数字")
             return None
-
-    def _prompt_return_to_ui(self, prompt: str):
-        ui = getattr(self.g, "ui", None)
-        hidden = False
-        if ui is not None and getattr(ui, "show_ui", False):
-            ui.simulate_key("h")
-            hidden = True
-        try:
-            return input(prompt)
-        finally:
-            if hidden:
-                ui.simulate_key("\n")
 
     def start_manual_control_1dof(self, data_name: str, part: str):
         self.manual_control_active = True
