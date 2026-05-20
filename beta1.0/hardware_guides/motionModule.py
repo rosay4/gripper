@@ -1136,6 +1136,7 @@ class MotionModule:
             ("零位行程和限位测试", lambda: self.zero_limit_travel_test(part=part, pos_name=pos_name, wait_for_return=False)),
             ("重复定位精度", lambda: self.repeatability_position_accuracy_test(part=part, pos_name=pos_name, wait_for_return=False)),
             ("绝对定位精度", lambda: self.absolute_position_accuracy_test(part=part, pos_name=pos_name, wait_for_return=False)),
+            ("一维力精度", lambda: self.one_dim_force_accuracy_test(part=self.g.selected_loadcell, wait_for_return=False)),
             ("阶跃响应测试", lambda: self.step_response_auto_test(part=part, pos_name=pos_name)),
             ("轨迹跟踪测试", lambda: self.topp_tracking_auto_test(part=part, pos_name=pos_name)),
         ]
@@ -2767,9 +2768,88 @@ class MotionModule:
             input("回车返回")
 
     @hide_ui_while
-    def one_dim_force_accuracy_test(self, part: str):
-        print("一维力精度功能待实现")
-        input("回车返回")
+    def one_dim_force_accuracy_test(self, part: str, wait_for_return: bool = True):
+        gripper_part = getattr(self.g, "selected_gripper", None)
+        if not gripper_part:
+            print("未找到当前夹爪名称，无法执行一维力精度测试")
+            if wait_for_return:
+                input("回车返回")
+            return
+
+        start_pos = 0.009
+        sample_count = 3
+        old_step = self.manual_control_step
+        self.manual_control_step = 0.00001
+        rows = []
+
+        print("开始一维力精度测试")
+        print(f"先移动夹爪到 {start_pos:.6f}")
+        ok = self._move_to_target(part=gripper_part, pos_name="gripper_pos", target=start_pos, timeout_s=5.0)
+        if not ok:
+            self.g.loggerUI.warn(f"一维力精度测试: 移动到 {start_pos:.6f} 超时，继续进入点按采样")
+            print(f"移动到 {start_pos:.6f} 超时，继续进入点按采样")
+
+        try:
+            print("点按模式: W/S 微调夹爪，R 记录当前推拉力计读数，Q 退出")
+            print(f"点按步长: {self.manual_control_step:.5f}")
+            while len(rows) < sample_count:
+                ch = None
+                try:
+                    ch = self.g.ui.win_menu.getch()
+                except Exception:
+                    ch = -1
+
+                if ch == -1:
+                    time.sleep(0.02)
+                    continue
+
+                key = chr(ch).lower()
+                if key in ("w", "s"):
+                    current = self._get_feedback_scalar("gripper_pos")
+                    if current is None:
+                        print("当前夹爪位置无效，无法点按")
+                        continue
+                    direction = 1.0 if key == "w" else -1.0
+                    new_pos = current + direction * self.manual_control_step
+                    self.g.robot.set_actions({gripper_part: {"type": "position", "position": [new_pos]}})
+                    self.g.loggerUI.info(f"一维力精度点按: {current:.6f} -> {new_pos:.6f}")
+                    print(f"当前目标位置: {new_pos:.6f}")
+                elif key == "r":
+                    gauge_raw = input(f"请输入第 {len(rows) + 1}/{sample_count} 次数显推拉力计读数(N): ").strip()
+                    try:
+                        gauge_value = float(gauge_raw)
+                    except ValueError:
+                        print("输入无效，请输入数字")
+                        continue
+                    with self.g.feedback_lock:
+                        force_tip = list(getattr(self.g.feedbackData, "force_tip", [None, None]))
+                    ch0 = self._coerce_scalar(force_tip[0] if len(force_tip) > 0 else None)
+                    ch1 = self._coerce_scalar(force_tip[1] if len(force_tip) > 1 else None)
+                    rows.append([gauge_value, ch0, ch1])
+                    print(f"已记录 {len(rows)}/{sample_count}: 推拉力计={gauge_value}, 通道0={ch0}, 通道1={ch1}")
+                elif key == "q":
+                    print("一维力精度测试已退出")
+                    return
+
+            out_dir = os.path.join(project_root, "logs")
+            os.makedirs(out_dir, exist_ok=True)
+            tstamp = time.strftime("%Y%m%d_%H%M%S")
+            out_file = os.path.join(out_dir, f"one_dim_force_accuracy_{part}_{tstamp}.csv")
+            with open(out_file, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "测量用一维力传感器数据（N）",
+                    "夹爪一维力通道0数据（N）",
+                    "夹爪一维力通道1数据（N）",
+                ])
+                writer.writerows(rows)
+
+            self.g.loggerUI.info(f"一维力精度测试完成, CSV: {out_file}")
+            print(f"一维力精度测试完成, 已保存 CSV: {out_file}")
+        finally:
+            self.manual_control_step = old_step
+            if wait_for_return:
+                input("回车返回")
 
     def start_manual_control_1dof(self, data_name: str, part: str):
         self.manual_control_active = True
