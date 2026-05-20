@@ -492,40 +492,47 @@ class GripperGuide(BaseGuide):
     def gripper_function_test(self):
         menu = {
             "1": {
+                "description": "自动执行全部基础功能测试",
+                "callback": lambda: self.motion.basic_function_auto_test(
+                    part=self.selected_gripper,
+                    pos_name="gripper_pos",
+                ),
+            },
+            "2": {
                 "description": "重复定位精度",
                 "callback": lambda: self.motion.repeatability_position_accuracy_test(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "2": {
+            "3": {
                 "description": "绝对定位精度",
                 "callback": lambda: self.motion.absolute_position_accuracy_test(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "3": {
+            "4": {
                 "description": "一维力精度",
                 "callback": lambda: self.motion.one_dim_force_accuracy_test(
                     part=self.selected_loadcell,
                 ),
             },
-            "4": {
+            "5": {
                 "description": "零位行程和限位测试",
                 "callback": lambda: self.motion.zero_limit_travel_test(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "5": {
+            "6": {
                 "description": "阶跃响应测试",
                 "callback": lambda: self.motion.step_response_auto_test(
                     part=self.selected_gripper,
                     pos_name="gripper_pos",
                 ),
             },
-            "6": {
+            "7": {
                 "description": "轨迹跟踪测试",
                 "callback": lambda: self.motion.topp_tracking_auto_test(
                     part=self.selected_gripper,

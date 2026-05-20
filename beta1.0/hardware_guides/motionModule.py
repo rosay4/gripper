@@ -876,6 +876,8 @@ class MotionModule:
 
             pos_img_path = row["plot_path"]
             vel_img_path = row["vel_plot_path"]
+            pos_img_embedded = False
+            vel_img_embedded = False
 
             if image_embed_enabled and os.path.exists(pos_img_path):
                 try:
@@ -884,6 +886,7 @@ class MotionModule:
                     pos_img.height = 210
                     pos_img.anchor = f"B{idx}"
                     ws.add_image(pos_img)
+                    pos_img_embedded = True
                 except Exception as e:
                     ws.cell(row=idx, column=2, value=f"插图失败，路径: {pos_img_path}, err: {e}")
             else:
@@ -896,13 +899,30 @@ class MotionModule:
                     vel_img.height = 210
                     vel_img.anchor = f"C{idx}"
                     ws.add_image(vel_img)
+                    vel_img_embedded = True
                 except Exception as e:
                     ws.cell(row=idx, column=3, value=f"插图失败，路径: {vel_img_path}, err: {e}")
             else:
                 ws.cell(row=idx, column=3, value=vel_img_path if os.path.exists(vel_img_path) else f"图片不存在: {vel_img_path}")
 
+            row["_report_images_embedded"] = pos_img_embedded and vel_img_embedded
+
         wb.save(report_path)
         return report_path
+
+    def _cleanup_report_images(self, rows: list):
+        for row in rows:
+            if not row.get("_report_images_embedded"):
+                continue
+            for key in ("plot_path", "vel_plot_path"):
+                image_path = row.get(key)
+                if not image_path:
+                    continue
+                try:
+                    if os.path.exists(image_path):
+                        os.remove(image_path)
+                except OSError as e:
+                    self.g.loggerUI.warn(f"临时图片删除失败: {image_path}, err: {e}")
 
     def _run_topp_record_once_auto(
         self,
@@ -1042,6 +1062,7 @@ class MotionModule:
             time.sleep(settle_wait_s)
 
         report_path = self._write_step_response_report_xlsx(rows)
+        self._cleanup_report_images(rows)
         print(f"=== 自动阶跃响应测试结束，报告已生成: {report_path} ===")
         self.g.loggerUI.info(f"自动阶跃响应测试结束，报告: {report_path}")
 
@@ -1106,8 +1127,29 @@ class MotionModule:
             report_prefix="topp_tracking_report",
             second_col_title="位置及跟踪误差数据可视化",
         )
+        self._cleanup_report_images(rows)
         print(f"=== 自动轨迹跟踪测试结束，报告已生成: {report_path} ===")
         self.g.loggerUI.info(f"自动轨迹跟踪测试结束，报告: {report_path}")
+
+    def basic_function_auto_test(self, part: str, pos_name: str):
+        tests = [
+            ("零位行程和限位测试", lambda: self.zero_limit_travel_test(part=part, pos_name=pos_name, wait_for_return=False)),
+            ("重复定位精度", lambda: self.repeatability_position_accuracy_test(part=part, pos_name=pos_name, wait_for_return=False)),
+            ("绝对定位精度", lambda: self.absolute_position_accuracy_test(part=part, pos_name=pos_name, wait_for_return=False)),
+            ("阶跃响应测试", lambda: self.step_response_auto_test(part=part, pos_name=pos_name)),
+            ("轨迹跟踪测试", lambda: self.topp_tracking_auto_test(part=part, pos_name=pos_name)),
+        ]
+
+        print("=== 基础功能自动测试开始 ===")
+        self.g.loggerUI.info("基础功能自动测试开始")
+        for idx, (name, run_test) in enumerate(tests, start=1):
+            print(f"\n[{idx}/{len(tests)}] 开始{name}")
+            self.g.loggerUI.info(f"基础功能自动测试: 开始{name}")
+            run_test()
+            print(f"[{idx}/{len(tests)}] 完成{name}")
+            self.g.loggerUI.info(f"基础功能自动测试: 完成{name}")
+        print("=== 基础功能自动测试结束 ===")
+        self.g.loggerUI.info("基础功能自动测试结束")
 
     @hide_ui_while
     def set_limits(self,part):
@@ -2602,7 +2644,7 @@ class MotionModule:
         input("按回车返回菜单")
 
     @hide_ui_while
-    def repeatability_position_accuracy_test(self, part: str, pos_name: str):
+    def repeatability_position_accuracy_test(self, part: str, pos_name: str, wait_for_return: bool = True):
         repeats = 10
         targets = [0.005, 0.045]
         settle_s = 1.0
@@ -2639,7 +2681,8 @@ class MotionModule:
 
         if not rows:
             print("没有采集到有效数据")
-            input("回车返回")
+            if wait_for_return:
+                input("回车返回")
             return
 
         out_dir = os.path.join(project_root, "logs")
@@ -2659,10 +2702,11 @@ class MotionModule:
 
         self.g.loggerUI.info(f"重复定位精度测试完成, CSV: {out_file}")
         print(f"\n测试完成, 已保存 CSV: {out_file}")
-        input("回车返回")
+        if wait_for_return:
+            input("回车返回")
 
     @hide_ui_while
-    def absolute_position_accuracy_test(self, part: str, pos_name: str):
+    def absolute_position_accuracy_test(self, part: str, pos_name: str, wait_for_return: bool = True):
         targets_m = [0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05]
         settle_s = 1.0
         timeout_s = 3.0
@@ -2697,7 +2741,8 @@ class MotionModule:
 
         if not rows:
             print("没有采集到有效数据")
-            input("回车返回")
+            if wait_for_return:
+                input("回车返回")
             return
 
         out_dir = os.path.join(project_root, "logs")
@@ -2718,7 +2763,8 @@ class MotionModule:
 
         self.g.loggerUI.info(f"绝对定位精度测试完成, CSV: {out_file}")
         print(f"\n测试完成, 已保存 CSV: {out_file}")
-        input("回车返回")
+        if wait_for_return:
+            input("回车返回")
 
     @hide_ui_while
     def one_dim_force_accuracy_test(self, part: str):
@@ -2857,7 +2903,7 @@ class MotionModule:
         input("回车以返回")
 
     @hide_ui_while
-    def zero_limit_travel_test(self, part: str, pos_name: str = "gripper_pos"):
+    def zero_limit_travel_test(self, part: str, pos_name: str = "gripper_pos", wait_for_return: bool = True):
         """
         零位行程和限位测试：
         - 记录零点/0.05位置激光测距（mm）
@@ -2950,11 +2996,13 @@ class MotionModule:
 
             self.g.loggerUI.info(f"零位行程和限位测试已保存: {csv_path}")
             print(f"零位行程和限位测试已保存: {csv_path}")
-            input("按回车返回")
+            if wait_for_return:
+                input("按回车返回")
         except Exception as e:
             self.g.loggerUI.error(f"零位行程和限位测试失败: {e}")
             print(f"零位行程和限位测试失败: {e}")
-            input("按回车返回")
+            if wait_for_return:
+                input("按回车返回")
     
     def move_multiple_points(self):
         #从csv文件加载为dict
