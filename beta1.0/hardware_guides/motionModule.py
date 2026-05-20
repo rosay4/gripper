@@ -2767,7 +2767,6 @@ class MotionModule:
         if wait_for_return:
             input("回车返回")
 
-    @hide_ui_while
     def one_dim_force_accuracy_test(self, part: str, wait_for_return: bool = True):
         gripper_part = getattr(self.g, "selected_gripper", None)
         if not gripper_part:
@@ -2782,16 +2781,15 @@ class MotionModule:
         self.manual_control_step = 0.00001
         rows = []
 
-        print("开始一维力精度测试")
-        print(f"先移动夹爪到 {start_pos:.6f}")
+        self.g.loggerUI.info("开始一维力精度测试")
+        self.g.loggerUI.info(f"先移动夹爪到 {start_pos:.6f}")
         ok = self._move_to_target(part=gripper_part, pos_name="gripper_pos", target=start_pos, timeout_s=5.0)
         if not ok:
             self.g.loggerUI.warn(f"一维力精度测试: 移动到 {start_pos:.6f} 超时，继续进入点按采样")
-            print(f"移动到 {start_pos:.6f} 超时，继续进入点按采样")
 
         try:
-            print("点按模式: W/S 微调夹爪，R 记录当前推拉力计读数，Q 退出")
-            print(f"点按步长: {self.manual_control_step:.5f}")
+            self.g.loggerUI.info("点按模式: W/S 微调夹爪，R 记录推拉力计读数，Q 退出")
+            self.g.loggerUI.info(f"点按步长: {self.manual_control_step:.5f}")
             while len(rows) < sample_count:
                 ch = None
                 try:
@@ -2813,22 +2811,21 @@ class MotionModule:
                     new_pos = current + direction * self.manual_control_step
                     self.g.robot.set_actions({gripper_part: {"type": "position", "position": [new_pos]}})
                     self.g.loggerUI.info(f"一维力精度点按: {current:.6f} -> {new_pos:.6f}")
-                    print(f"当前目标位置: {new_pos:.6f}")
                 elif key == "r":
-                    gauge_raw = input(f"请输入第 {len(rows) + 1}/{sample_count} 次数显推拉力计读数(N): ").strip()
-                    try:
-                        gauge_value = float(gauge_raw)
-                    except ValueError:
-                        print("输入无效，请输入数字")
+                    gauge_value = self._prompt_one_dim_force_gauge_value(
+                        sample_index=len(rows) + 1,
+                        sample_count=sample_count,
+                    )
+                    if gauge_value is None:
                         continue
                     with self.g.feedback_lock:
                         force_tip = list(getattr(self.g.feedbackData, "force_tip", [None, None]))
                     ch0 = self._coerce_scalar(force_tip[0] if len(force_tip) > 0 else None)
                     ch1 = self._coerce_scalar(force_tip[1] if len(force_tip) > 1 else None)
                     rows.append([gauge_value, ch0, ch1])
-                    print(f"已记录 {len(rows)}/{sample_count}: 推拉力计={gauge_value}, 通道0={ch0}, 通道1={ch1}")
+                    self.g.loggerUI.info(f"已记录 {len(rows)}/{sample_count}: 推拉力计={gauge_value}, 通道0={ch0}, 通道1={ch1}")
                 elif key == "q":
-                    print("一维力精度测试已退出")
+                    self.g.loggerUI.info("一维力精度测试已退出")
                     return
 
             out_dir = os.path.join(project_root, "logs")
@@ -2845,11 +2842,34 @@ class MotionModule:
                 writer.writerows(rows)
 
             self.g.loggerUI.info(f"一维力精度测试完成, CSV: {out_file}")
-            print(f"一维力精度测试完成, 已保存 CSV: {out_file}")
         finally:
             self.manual_control_step = old_step
             if wait_for_return:
-                input("回车返回")
+                self._prompt_return_to_ui("一维力精度测试结束，回车返回")
+
+    def _prompt_one_dim_force_gauge_value(self, sample_index: int, sample_count: int):
+        raw = self._prompt_return_to_ui(
+            f"请输入第 {sample_index}/{sample_count} 次数显推拉力计读数(N): "
+        ).strip()
+        if not raw:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            self.g.loggerUI.warn("输入无效，请按 R 重新记录并输入数字")
+            return None
+
+    def _prompt_return_to_ui(self, prompt: str):
+        ui = getattr(self.g, "ui", None)
+        hidden = False
+        if ui is not None and getattr(ui, "show_ui", False):
+            ui.simulate_key("h")
+            hidden = True
+        try:
+            return input(prompt)
+        finally:
+            if hidden:
+                ui.simulate_key("\n")
 
     def start_manual_control_1dof(self, data_name: str, part: str):
         self.manual_control_active = True
