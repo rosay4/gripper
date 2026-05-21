@@ -135,7 +135,7 @@ class CursesUI:
         self._last_hidden_msg_time = 0.0
         self.hidden_msg_interval = 1.0
         ## hblog
-        self._hblog_lines = deque(maxlen=1000)
+        self._hblog_lines = deque(maxlen=200)
         self.hblog_view_start = 0
         self.hblog_scroll = 0
         self.hblog_follow = True
@@ -284,7 +284,7 @@ class CursesUI:
                     elif item.get("type") == "rate":
                         fb.device_rate[item["device"]] = item["rate"]
                 elif isinstance(item, str):
-                    self._hblog_lines.append(item)
+                    self._hblog_lines.append(self._sanitize_hblog_line(item))
 
         
     def _draw_feedback(self):
@@ -466,8 +466,8 @@ class CursesUI:
                 line_num = start + i + 1
                 text = f"{line_num:4d} | {line}"
                 w.addstr(1 + i, 2, text[:w_max - 4])
-            except curses.error as e:
-                print(e)
+            except curses.error:
+                pass
 
         if not self.hblog_follow:
             start_line = start + 1                # 当前视图第一行的全局行号
@@ -480,6 +480,12 @@ class CursesUI:
 
 
         w.noutrefresh()
+
+    def _sanitize_hblog_line(self, line):
+        text = str(line).replace("\t", " ")
+        text = "".join(ch if ch.isprintable() else " " for ch in text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:200]
 
 
     def simulate_key(self,key:str):

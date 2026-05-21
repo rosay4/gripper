@@ -1179,7 +1179,7 @@ class MotionModule:
         safe_no = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in gripper_no)
         tstamp = time.strftime("%Y%m%d_%H%M%S")
         prev_output_dir = self.current_output_dir
-        self.current_output_dir = os.path.join(project_root, "logs", f"gripper_{safe_no}_{tstamp}")
+        self.current_output_dir = os.path.join(project_root, "logs", f"{safe_no}_{tstamp}")
         os.makedirs(self.current_output_dir, exist_ok=True)
 
         tests = [
@@ -1194,17 +1194,36 @@ class MotionModule:
         print("=== 基础功能自动测试开始 ===")
         print(f"结果目录: {self.current_output_dir}")
         self.g.loggerUI.info(f"基础功能自动测试开始 gripper={safe_no}")
+        success = False
         try:
             for idx, (name, run_test) in enumerate(tests, start=1):
                 print(f"\n[{idx}/{len(tests)}] 开始{name}")
                 self.g.loggerUI.info(f"[{idx}/{len(tests)}] {name}")
                 run_test()
                 print(f"[{idx}/{len(tests)}] 完成{name}")
+            success = True
         finally:
             out_dir = self.current_output_dir
             self.current_output_dir = prev_output_dir
-        print("=== 基础功能自动测试结束 ===")
-        self.g.loggerUI.info(f"基础功能自动测试完成 gripper={safe_no} dir={os.path.basename(out_dir)}")
+            if success:
+                print("=== 基础功能自动测试结束 ===")
+                self.g.loggerUI.info(f"基础功能自动测试完成 gripper={safe_no} dir={os.path.basename(out_dir)}")
+            self._clear_hblog_view()
+
+    def _clear_hblog_view(self):
+        try:
+            self.g.hblog_buffer.consume()
+        except Exception:
+            pass
+        ui = getattr(self.g, "ui", None)
+        if ui is None:
+            return
+        try:
+            ui._hblog_lines.clear()
+            ui.hblog_view_start = 0
+            ui.hblog_follow = True
+        except Exception:
+            pass
 
     @hide_ui_while
     def set_limits(self,part):
@@ -2315,6 +2334,17 @@ class MotionModule:
         else:
             print(f"    ! 无法读取激光距离，跳过验证")
             self.g.loggerUI.warn(f"[验证跳过] {part} 无法读取激光距离")
+
+        try:
+            self.g.robot.send_command(
+                part,
+                {"command": "set_limit", "enabled": [True], "lower": [0.0], "upper": [0.05]},
+            )
+            print("    ✓ 已设置软限位: 0.0 ~ 0.05")
+            self.g.loggerUI.info(f"[限位设置] {part}: 0.0~0.05")
+        except Exception as e:
+            print(f"    ! 设置软限位失败: {e}")
+            self.g.loggerUI.warn(f"[限位设置失败] {part}: {e}")
         
         # 清除状态
         delattr(self, '_calibration_state')
@@ -3011,6 +3041,13 @@ class MotionModule:
         time.sleep(1)
         self.g.loggerUI.info(f"{part}的通道{ch}已硬件设零")
 
+    @hide_ui_while
+    def set_zero_loadcell_all(self, part: str):
+        self.set_zero_loadcell(part=part, ch=0)
+        self.set_zero_loadcell(part=part, ch=1)
+        print("一维力传感器通道0/1已整体置零")
+        input("按回车返回")
+
     def _set_lasers_zero_core(self):
         """
         Laser distance sensors set-zero for left and right (no UI interaction).
@@ -3067,6 +3104,15 @@ class MotionModule:
         known_force = input("请输入已知的标定力值(单位N),回车继续:")
         self.g.robot.send_command(part,{"command":"calibrate_force","index":ch,"force":float(known_force)})
         self.g.loggerUI.info(f"{part}的通道{ch}已标定为{known_force}N")
+
+    @hide_ui_while
+    def calibrate_loadcell_all(self, part: str):
+        known_force = float(input("请输入已知的标定力值(单位N),将同时标定通道0/1,回车继续:"))
+        self.g.robot.send_command(part, {"command": "calibrate_force", "index": 0, "force": known_force})
+        self.g.robot.send_command(part, {"command": "calibrate_force", "index": 1, "force": known_force})
+        self.g.loggerUI.info(f"{part}的通道0/1已整体标定为{known_force}N")
+        print(f"一维力传感器通道0/1已整体标定为 {known_force}N")
+        input("按回车返回")
     
     def get_limits(self,part):
         print("当前关节范围:",self.g.robot.send_command(part, {"command": "get_limit"}))
@@ -3130,6 +3176,9 @@ class MotionModule:
             zero_error_mm = None if zero_laser_mm is None else (zero_laser_mm - 0.0)
             soft_travel_error_mm = None if soft_laser_mm is None else (soft_laser_mm - 0.05)
             length_per_radian = self._get_feedback_scalar("config_length_per_radian")
+
+            print("\n虚位测量准备: 先移动到 0.020")
+            move_and_wait(0.02, wait_s=1.0)
 
             print("\n=== 虚位测量 ===")
             print("请先往夹爪闭合方向按，稳定后按任意键采样 realdistance1")
