@@ -45,6 +45,22 @@ class MotionModule:
         self.manual_control_step = 0.0005
         self.max_acc = 0.1
         self.max_vel = 0.1
+        self.current_output_dir = None
+
+    def _get_output_dir(self):
+        out_dir = self.current_output_dir or os.path.join(project_root, "logs")
+        os.makedirs(out_dir, exist_ok=True)
+        return out_dir
+
+    def _move_log_file_to_output_dir(self, filename: str):
+        if not filename:
+            return filename
+        out_dir = self._get_output_dir()
+        src = filename if os.path.isabs(filename) else os.path.join(project_root, "logs", filename)
+        dst = os.path.join(out_dir, os.path.basename(filename))
+        if os.path.abspath(src) != os.path.abspath(dst) and os.path.exists(src):
+            os.replace(src, dst)
+        return os.path.basename(dst)
 
     def _coerce_scalar(self, value):
         if value is None:
@@ -796,9 +812,12 @@ class MotionModule:
                 time.sleep(1 / CONTROL_HZ)
 
             highfreq_filename, lowfreq_filename, tstamp = self.g.logger._save_logs(part)
+            highfreq_filename = self._move_log_file_to_output_dir(highfreq_filename)
+            lowfreq_filename = self._move_log_file_to_output_dir(lowfreq_filename)
             fig_name = f"viz_{tstamp}.png"
+            out_dir = self._get_output_dir()
             draw_step_response_analysis(
-                log_dir=f"{project_root}/logs",
+                log_dir=out_dir,
                 lowfile=lowfreq_filename,
                 highfile=highfreq_filename,
                 savefig=fig_name,
@@ -813,9 +832,9 @@ class MotionModule:
                 "timed_out": timed_out,
                 "highfreq_file": highfreq_filename,
                 "lowfreq_file": lowfreq_filename,
-                "plot_path": f"{project_root}/logs/{fig_name}",
-                "vel_plot_path": f"{project_root}/logs/vel_{fig_name}",
-                "temp_plot_path": f"{project_root}/logs/temp_{fig_name}",
+                "plot_path": os.path.join(out_dir, fig_name),
+                "vel_plot_path": os.path.join(out_dir, f"vel_{fig_name}"),
+                "temp_plot_path": os.path.join(out_dir, f"temp_{fig_name}"),
             }
         finally:
             self.g.record_flag.clear()
@@ -849,8 +868,8 @@ class MotionModule:
             image_import_error = e
 
         report_ts = time.strftime("%Y%m%d_%H%M%S")
-        report_path = f"{project_root}/logs/{report_prefix}_{report_ts}.xlsx"
-        os.makedirs(f"{project_root}/logs", exist_ok=True)
+        out_dir = self._get_output_dir()
+        report_path = os.path.join(out_dir, f"{report_prefix}_{report_ts}.xlsx")
 
         wb = Workbook()
         ws = wb.active
@@ -912,7 +931,7 @@ class MotionModule:
         return report_path
 
     def _cleanup_report_artifacts(self, rows: list):
-        log_dir = os.path.join(project_root, "logs")
+        log_dir = self._get_output_dir()
         for row in rows:
             for key in ("highfreq_file", "lowfreq_file"):
                 log_path = row.get(key)
@@ -1003,9 +1022,12 @@ class MotionModule:
                 time.sleep(1 / CONTROL_HZ)
 
             highfreq_filename, lowfreq_filename, tstamp = self.g.logger._save_logs(part)
+            highfreq_filename = self._move_log_file_to_output_dir(highfreq_filename)
+            lowfreq_filename = self._move_log_file_to_output_dir(lowfreq_filename)
             fig_name = f"viz_{tstamp}.png"
+            out_dir = self._get_output_dir()
             draw(
-                log_dir=f"{project_root}/logs",
+                log_dir=out_dir,
                 lowfile=lowfreq_filename,
                 highfile=highfreq_filename,
                 savefig=fig_name,
@@ -1016,9 +1038,9 @@ class MotionModule:
                 "target_pos": end_point.tolist(),
                 "highfreq_file": highfreq_filename,
                 "lowfreq_file": lowfreq_filename,
-                "plot_path": f"{project_root}/logs/{fig_name}",
-                "vel_plot_path": f"{project_root}/logs/vel_{fig_name}",
-                "temp_plot_path": f"{project_root}/logs/temp_{fig_name}",
+                "plot_path": os.path.join(out_dir, fig_name),
+                "vel_plot_path": os.path.join(out_dir, f"vel_{fig_name}"),
+                "temp_plot_path": os.path.join(out_dir, f"temp_{fig_name}"),
             }
         finally:
             self.g.record_flag.clear()
@@ -1043,7 +1065,6 @@ class MotionModule:
         rows = []
 
         print("=== 自动阶跃响应测试开始 ===")
-        self.g.loggerUI.info("自动阶跃响应测试开始")
 
         for r in range(rounds):
             print(f"[Round {r+1}/{rounds}] 先归零到 0.0")
@@ -1078,7 +1099,7 @@ class MotionModule:
         report_path = self._write_step_response_report_xlsx(rows)
         self._cleanup_report_artifacts(rows)
         print(f"=== 自动阶跃响应测试结束，报告已生成: {report_path} ===")
-        self.g.loggerUI.info(f"自动阶跃响应测试结束，报告: {report_path}")
+        self.g.loggerUI.info("阶跃响应测试完成")
 
     @hide_ui_while
     def topp_tracking_auto_test(self, part: str, pos_name: str):
@@ -1104,9 +1125,6 @@ class MotionModule:
         self.max_acc = 1.0
         print("=== 自动轨迹跟踪测试开始 ===")
         print(f"固定TOPP参数: max_vel={self.max_vel} rad/s, max_acc={self.max_acc} rad/s^2")
-        self.g.loggerUI.info(
-            f"自动轨迹跟踪测试开始，固定TOPP参数: max_vel={self.max_vel}, max_acc={self.max_acc}"
-        )
 
         for r in range(rounds):
             print(f"[Round {r+1}/{rounds}] 先归零到 0.0")
@@ -1143,9 +1161,27 @@ class MotionModule:
         )
         self._cleanup_report_artifacts(rows)
         print(f"=== 自动轨迹跟踪测试结束，报告已生成: {report_path} ===")
-        self.g.loggerUI.info(f"自动轨迹跟踪测试结束，报告: {report_path}")
+        self.g.loggerUI.info("轨迹跟踪测试完成")
 
     def basic_function_auto_test(self, part: str, pos_name: str):
+        ui = getattr(self.g, "ui", None)
+        hidden_for_input = False
+        if ui is not None and getattr(ui, "show_ui", False):
+            ui.simulate_key("h")
+            hidden_for_input = True
+        try:
+            gripper_no = input("请输入夹爪 ID: ").strip()
+        finally:
+            if hidden_for_input:
+                ui.simulate_key("\n")
+        if not gripper_no:
+            gripper_no = "unknown"
+        safe_no = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in gripper_no)
+        tstamp = time.strftime("%Y%m%d_%H%M%S")
+        prev_output_dir = self.current_output_dir
+        self.current_output_dir = os.path.join(project_root, "logs", f"gripper_{safe_no}_{tstamp}")
+        os.makedirs(self.current_output_dir, exist_ok=True)
+
         tests = [
             ("零位行程和限位测试", lambda: self.zero_limit_travel_test(part=part, pos_name=pos_name, wait_for_return=False)),
             ("重复定位精度", lambda: self.repeatability_position_accuracy_test(part=part, pos_name=pos_name, wait_for_return=False)),
@@ -1156,15 +1192,19 @@ class MotionModule:
         ]
 
         print("=== 基础功能自动测试开始 ===")
-        self.g.loggerUI.info("基础功能自动测试开始")
-        for idx, (name, run_test) in enumerate(tests, start=1):
-            print(f"\n[{idx}/{len(tests)}] 开始{name}")
-            self.g.loggerUI.info(f"基础功能自动测试: 开始{name}")
-            run_test()
-            print(f"[{idx}/{len(tests)}] 完成{name}")
-            self.g.loggerUI.info(f"基础功能自动测试: 完成{name}")
+        print(f"结果目录: {self.current_output_dir}")
+        self.g.loggerUI.info(f"基础功能自动测试开始 gripper={safe_no}")
+        try:
+            for idx, (name, run_test) in enumerate(tests, start=1):
+                print(f"\n[{idx}/{len(tests)}] 开始{name}")
+                self.g.loggerUI.info(f"[{idx}/{len(tests)}] {name}")
+                run_test()
+                print(f"[{idx}/{len(tests)}] 完成{name}")
+        finally:
+            out_dir = self.current_output_dir
+            self.current_output_dir = prev_output_dir
         print("=== 基础功能自动测试结束 ===")
-        self.g.loggerUI.info("基础功能自动测试结束")
+        self.g.loggerUI.info(f"基础功能自动测试完成 gripper={safe_no} dir={os.path.basename(out_dir)}")
 
     @hide_ui_while
     def set_limits(self,part):
@@ -2700,7 +2740,7 @@ class MotionModule:
                 input("回车返回")
             return
 
-        out_dir = os.path.join(project_root, "logs")
+        out_dir = self._get_output_dir()
         os.makedirs(out_dir, exist_ok=True)
         tstamp = time.strftime("%Y%m%d_%H%M%S")
         out_file = os.path.join(out_dir, f"repeatability_accuracy_{part}_{tstamp}.csv")
@@ -2715,7 +2755,7 @@ class MotionModule:
             ])
             writer.writerows(rows)
 
-        self.g.loggerUI.info(f"重复定位精度测试完成, CSV: {out_file}")
+        self.g.loggerUI.info("重复定位精度测试完成")
         print(f"\n测试完成, 已保存 CSV: {out_file}")
         if wait_for_return:
             input("回车返回")
@@ -2760,7 +2800,7 @@ class MotionModule:
                 input("回车返回")
             return
 
-        out_dir = os.path.join(project_root, "logs")
+        out_dir = self._get_output_dir()
         os.makedirs(out_dir, exist_ok=True)
         tstamp = time.strftime("%Y%m%d_%H%M%S")
         out_file = os.path.join(out_dir, f"absolute_accuracy_{part}_{tstamp}.csv")
@@ -2776,7 +2816,7 @@ class MotionModule:
             ])
             writer.writerows(rows)
 
-        self.g.loggerUI.info(f"绝对定位精度测试完成, CSV: {out_file}")
+        self.g.loggerUI.info("绝对定位精度测试完成")
         print(f"\n测试完成, 已保存 CSV: {out_file}")
         if wait_for_return:
             input("回车返回")
@@ -2845,7 +2885,7 @@ class MotionModule:
                     print("\n一维力精度测试已退出")
                     return
 
-            out_dir = os.path.join(project_root, "logs")
+            out_dir = self._get_output_dir()
             os.makedirs(out_dir, exist_ok=True)
             tstamp = time.strftime("%Y%m%d_%H%M%S")
             out_file = os.path.join(out_dir, f"one_dim_force_accuracy_{part}_{tstamp}.csv")
@@ -2858,14 +2898,14 @@ class MotionModule:
                 ])
                 writer.writerows(rows)
 
-            self.g.loggerUI.info(f"一维力精度测试完成, CSV: {out_file}")
+            self.g.loggerUI.info("一维力精度测试完成")
             print(f"\n一维力精度测试完成, CSV: {out_file}")
         finally:
             self.manual_control_step = old_step
             if wait_for_return:
                 input("一维力精度测试结束，回车返回")
 
-    def _read_hidden_terminal_key(self):
+    def _read_hidden_terminal_key(self, block: bool = False):
         try:
             import select
             import termios
@@ -2882,7 +2922,8 @@ class MotionModule:
         new_attrs[6][termios.VTIME] = 1
         try:
             termios.tcsetattr(fd, termios.TCSADRAIN, new_attrs)
-            ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+            timeout = None if block else 0.1
+            ready, _, _ = select.select([sys.stdin], [], [], timeout)
             if not ready:
                 return None
             ch = sys.stdin.read(1)
@@ -3032,18 +3073,6 @@ class MotionModule:
         input("回车以返回")
 
     @hide_ui_while
-    def get_motor_sn(self, part: str):
-        commands = ("get_sn", "get_serial_number", "get_serial", "get_hardware_version")
-        for command in commands:
-            try:
-                result = self.g.robot.send_command(part, {"command": command})
-            except Exception as e:
-                print(f"{command}: failed ({e})")
-                continue
-            print(f"{command}: {result}")
-        input("回车返回")
-
-    @hide_ui_while
     def zero_limit_travel_test(self, part: str, pos_name: str = "gripper_pos", wait_for_return: bool = True):
         """
         零位行程和限位测试：
@@ -3100,9 +3129,23 @@ class MotionModule:
             # errors (target value for soft limit is 0.05 per requirement)
             zero_error_mm = None if zero_laser_mm is None else (zero_laser_mm - 0.0)
             soft_travel_error_mm = None if soft_laser_mm is None else (soft_laser_mm - 0.05)
+            length_per_radian = self._get_feedback_scalar("config_length_per_radian")
+
+            print("\n=== 虚位测量 ===")
+            print("请先往夹爪闭合方向按，稳定后按任意键采样 realdistance1")
+            self._read_hidden_terminal_key(block=True)
+            realdistance1 = read_laser()
+            print(f"realdistance1 = {realdistance1}")
+            print("请再往夹爪张开方向扩，稳定后按任意键采样 realdistance2")
+            self._read_hidden_terminal_key(block=True)
+            realdistance2 = read_laser()
+            print(f"realdistance2 = {realdistance2}")
+            backlash_mm = None
+            if realdistance1 is not None and realdistance2 is not None:
+                backlash_mm = realdistance2 - realdistance1
 
             # write CSV
-            log_dir = Path(project_root) / "logs"
+            log_dir = Path(self._get_output_dir())
             log_dir.mkdir(exist_ok=True)
             tstamp = time.strftime("%Y%m%d_%H%M%S")
             csv_path = log_dir / f"zero_limit_test_{tstamp}_{part}.csv"
@@ -3134,8 +3177,10 @@ class MotionModule:
                 writer = csv.writer(f)
                 writer.writerow(headers)
                 writer.writerow(row)
+                writer.writerow(["length per radian", "虚位（mm）"])
+                writer.writerow([length_per_radian, backlash_mm])
 
-            self.g.loggerUI.info(f"零位行程和限位测试已保存: {csv_path}")
+            self.g.loggerUI.info("零位行程和限位测试完成")
             print(f"零位行程和限位测试已保存: {csv_path}")
             if wait_for_return:
                 input("按回车返回")
