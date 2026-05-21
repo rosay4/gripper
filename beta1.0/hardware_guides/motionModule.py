@@ -945,16 +945,33 @@ class MotionModule:
                 except OSError as e:
                     self.g.loggerUI.warn(f"临时数据删除失败: {log_path}, err: {e}")
 
-            if row.get("_report_images_embedded"):
-                for key in ("plot_path", "vel_plot_path", "temp_plot_path"):
-                    image_path = row.get(key)
-                    if not image_path:
-                        continue
-                    try:
-                        if os.path.exists(image_path):
-                            os.remove(image_path)
-                    except OSError as e:
-                        self.g.loggerUI.warn(f"临时图片删除失败: {image_path}, err: {e}")
+            for key in ("plot_path", "vel_plot_path", "temp_plot_path"):
+                image_path = row.get(key)
+                if not image_path:
+                    continue
+                try:
+                    if os.path.exists(image_path):
+                        os.remove(image_path)
+                except OSError as e:
+                    self.g.loggerUI.warn(f"临时图片删除失败: {image_path}, err: {e}")
+
+    def _cleanup_auto_output_artifacts(self, out_dir: str):
+        if not out_dir or not os.path.isdir(out_dir):
+            return
+        transient_keywords = ("viz", "tmp", "temp", "highfreq", "lowfreq")
+        for path in Path(out_dir).iterdir():
+            if not path.is_file():
+                continue
+            name = path.name.lower()
+            should_delete = path.suffix.lower() == ".png" or (
+                path.suffix.lower() == ".json" and any(key in name for key in transient_keywords)
+            )
+            if not should_delete:
+                continue
+            try:
+                path.unlink()
+            except OSError as e:
+                self.g.loggerUI.warn(f"临时文件删除失败: {path}, err: {e}")
 
     def _run_topp_record_once_auto(
         self,
@@ -1208,6 +1225,7 @@ class MotionModule:
             if success:
                 print("=== 基础功能自动测试结束 ===")
                 self.g.loggerUI.info(f"基础功能自动测试完成 gripper={safe_no} dir={os.path.basename(out_dir)}")
+            self._cleanup_auto_output_artifacts(out_dir)
             self._clear_hblog_view()
 
     def _clear_hblog_view(self):

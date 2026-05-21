@@ -196,7 +196,7 @@ def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig=
     plt.tight_layout()
     
     # 保存图像
-    save_path = f"{project_root}/logs/{savefig}"
+    save_path = log_dir / savefig
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     print(f"✅ 图像已保存为 {save_path}")
 
@@ -217,7 +217,7 @@ def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig=
     axv.grid(True, alpha=0.3)
     axv.legend(fontsize='small')
 
-    vel_save_path = f"{project_root}/logs/vel_{savefig}"
+    vel_save_path = log_dir / f"vel_{savefig}"
     fig_v.savefig(vel_save_path, dpi=200, bbox_inches='tight')
     print(f"✅ 高频速度图已保存为 {vel_save_path}")
 
@@ -231,7 +231,7 @@ def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig=
         axt.set_ylabel("Temperature (°C)")
         axt.grid(True, alpha=0.3)
         axt.legend(fontsize='small')
-        temp_save_path = f"{project_root}/logs/temp_{savefig}"
+        temp_save_path = log_dir / f"temp_{savefig}"
         fig_t.savefig(temp_save_path, dpi=200, bbox_inches='tight')
         print(f"Saved temperature plot: {temp_save_path}")
 
@@ -437,7 +437,7 @@ def draw_step_response_analysis(log_dir=".",
     fig.suptitle(f"Step Response Analysis\nLowFreq: {lowfile}, HighFreq: {highfile}", fontsize=12)
     plt.tight_layout()
 
-    save_path = f"{project_root}/logs/{savefig}"
+    save_path = log_dir / savefig
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     print(f"✅ Step Response 图已保存为 {save_path}")
 
@@ -458,7 +458,7 @@ def draw_step_response_analysis(log_dir=".",
     axv.grid(True, alpha=0.3)
     axv.legend(fontsize='small')
 
-    vel_save_path = f"{project_root}/logs/vel_{savefig}"
+    vel_save_path = log_dir / f"vel_{savefig}"
     fig_v.savefig(vel_save_path, dpi=200, bbox_inches='tight')
     print(f"✅ 高频速度图已保存为 {vel_save_path}")
 

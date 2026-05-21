@@ -141,6 +141,7 @@ class CursesUI:
         self.hblog_follow = True
         self._last_scroll_time = 0
         self._scroll_boost = 1
+        self.stdscr = None
         ## 菜单分页
         self.menu_items_per_page = 8  # 每页显示8个选项
         self.menu_page = 0  # 当前页码
@@ -153,24 +154,39 @@ class CursesUI:
         if height >= 40:
             self.feedback_h = 16
             self.menu_h = 14
-            self.hblog_h = 8
+            self.log_h = 5
         elif height >= 30:
             self.feedback_h = 10
             self.menu_h = 11
-            self.hblog_h = 5
+            self.log_h = 5
         else:
             self.feedback_h = 8 if height >= 24 else 7
             self.menu_h = 9 if height >= 24 else 8
-            self.hblog_h = 3
+            self.log_h = 4
 
-        self.log_h = max(3, height - self.feedback_h - self.menu_h - self.hblog_h)
+        self.hblog_h = height - self.feedback_h - self.menu_h - self.log_h
+        if self.hblog_h < 3:
+            shortage = 3 - self.hblog_h
+            take_menu = min(shortage, max(0, self.menu_h - 6))
+            self.menu_h -= take_menu
+            shortage -= take_menu
+            take_feedback = min(shortage, max(0, self.feedback_h - 6))
+            self.feedback_h -= take_feedback
+            shortage -= take_feedback
+            if shortage > 0:
+                self.log_h = max(3, self.log_h - shortage)
+            self.hblog_h = height - self.feedback_h - self.menu_h - self.log_h
+        self.hblog_h = max(3, self.hblog_h)
         self.menu_items_per_page = max(2, self.menu_h - 6)
 
     def _create_windows(self, stdscr):
+        self.stdscr = stdscr
         H, W = stdscr.getmaxyx()
         self._apply_layout(H)
         log_y = self.feedback_h + self.menu_h
         hblog_y = log_y + self.log_h
+        stdscr.erase()
+        stdscr.refresh()
         self.win_feedback = curses.newwin(self.feedback_h, W, 0, 0)
         self.win_menu = curses.newwin(self.menu_h, W, self.feedback_h, 0)
         self.win_menu.nodelay(True)
@@ -228,6 +244,7 @@ class CursesUI:
         return False
 
     def _main(self, stdscr):
+        self.stdscr = stdscr
         curses.curs_set(0)
         stdscr.nodelay(True)
         stdscr.keypad(True)
@@ -255,6 +272,8 @@ class CursesUI:
             # ===== 正常 UI 刷新 =====
             if self.show_ui:
                 self._consume_hblog_buffer()
+                stdscr.erase()
+                stdscr.noutrefresh()
                 self._draw_feedback()
                 self._draw_menu()
                 self._draw_log()
@@ -498,8 +517,16 @@ class CursesUI:
                 curses.endwin()
         if key == '\n':
             self.show_ui = True
-            stdscr = curses.initscr()
+            stdscr = self.stdscr or curses.initscr()
+            curses.noecho()
+            curses.cbreak()
             curses.curs_set(0)
+            stdscr.nodelay(True)
+            stdscr.keypad(True)
+            try:
+                curses.clearok(stdscr, True)
+            except Exception:
+                pass
             self._create_windows(stdscr)
             self._draw_feedback()
             self._draw_menu()
@@ -592,8 +619,16 @@ class CursesUI:
         if not self.show_ui:
             if key == '\n':
                 self.show_ui = True
-                stdscr = curses.initscr()
+                stdscr = self.stdscr or curses.initscr()
+                curses.noecho()
+                curses.cbreak()
                 curses.curs_set(0)
+                stdscr.nodelay(True)
+                stdscr.keypad(True)
+                try:
+                    curses.clearok(stdscr, True)
+                except Exception:
+                    pass
                 self._create_windows(stdscr)
                 self._draw_feedback()
                 self._draw_menu()
