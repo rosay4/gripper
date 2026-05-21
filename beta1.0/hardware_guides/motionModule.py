@@ -26,15 +26,16 @@ def hide_ui_while(func):
     假设函数所在对象 self 有 self.g.ui 属性
     """
     def wrapper(self, *args, **kwargs):
-        # 隐藏 UI
-        if hasattr(self.g, 'ui'):
-            self.g.ui.simulate_key('h')
+        ui = getattr(self.g, "ui", None)
+        hidden_by_wrapper = False
+        if ui is not None and getattr(ui, "show_ui", False):
+            ui.simulate_key("h")
+            hidden_by_wrapper = True
         try:
             result = func(self, *args, **kwargs)
         finally:
-            # 恢复 UI
-            if hasattr(self.g, 'ui'):
-                self.g.ui.simulate_key('\n')
+            if hidden_by_wrapper:
+                ui.simulate_key("\n")
         return result
     return wrapper
 
@@ -1182,15 +1183,11 @@ class MotionModule:
 
     def basic_function_auto_test(self, part: str, pos_name: str):
         ui = getattr(self.g, "ui", None)
-        hidden_for_input = False
+        hidden_for_auto = False
         if ui is not None and getattr(ui, "show_ui", False):
             ui.simulate_key("h")
-            hidden_for_input = True
-        try:
-            gripper_no = input("请输入夹爪 ID: ").strip()
-        finally:
-            if hidden_for_input:
-                ui.simulate_key("\n")
+            hidden_for_auto = True
+        gripper_no = input("请输入夹爪 ID: ").strip()
         if not gripper_no:
             gripper_no = "unknown"
         safe_no = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in gripper_no)
@@ -1227,6 +1224,8 @@ class MotionModule:
                 self.g.loggerUI.info(f"基础功能自动测试完成 gripper={safe_no} dir={os.path.basename(out_dir)}")
             self._cleanup_auto_output_artifacts(out_dir)
             self._clear_hblog_view()
+            if hidden_for_auto and ui is not None:
+                ui.simulate_key("\n")
 
     def _clear_hblog_view(self):
         try:
@@ -2879,9 +2878,10 @@ class MotionModule:
             return
 
         start_pos = 0.009
+        end_pos = 0.01
         sample_count = 3
         old_step = self.manual_control_step
-        self.manual_control_step = 0.00001
+        self.manual_control_step = 0.0005
         rows = []
 
         print("=== 一维力精度测试 ===")
@@ -2948,6 +2948,12 @@ class MotionModule:
 
             self.g.loggerUI.info("一维力精度测试完成")
             print(f"\n一维力精度测试完成, CSV: {out_file}")
+            print(f"4. 自动移动夹爪到 {end_pos:.6f}，请先取出/移开数显推拉力计")
+            ok = self._move_to_target(part=gripper_part, pos_name="gripper_pos", target=end_pos, timeout_s=5.0)
+            if not ok:
+                self.g.loggerUI.warn(f"一维力精度测试: 移动到 {end_pos:.6f} 超时")
+                print(f"移动到 {end_pos:.6f} 超时，请人工确认夹爪位置")
+            input("确认数显推拉力计已安全移开后，按回车继续")
         finally:
             self.manual_control_step = old_step
             if wait_for_return:
@@ -3131,6 +3137,74 @@ class MotionModule:
         self.g.loggerUI.info(f"{part}的通道0/1已整体标定为{known_force}N")
         print(f"一维力传感器通道0/1已整体标定为 {known_force}N")
         input("按回车返回")
+
+    @hide_ui_while
+    def zero_and_calibrate_loadcell_flow(self, part: str):
+        gripper_part = getattr(self.g, "selected_gripper", None)
+        if not gripper_part:
+            print("未找到当前夹爪名称，无法执行一维力标零与标定流程")
+            input("按回车返回")
+            return
+
+        old_step = self.manual_control_step
+        self.manual_control_step = 0.0005
+        try:
+            print("=== 一维力传感器标零与标定流程 ===")
+            print("1. 自动移动夹爪到 0.008700")
+            ok = self._move_to_target(part=gripper_part, pos_name="gripper_pos", target=0.0087, timeout_s=5.0)
+            if not ok:
+                self.g.loggerUI.warn("一维力标定流程: 移动到 0.008700 超时，继续标零")
+                print("移动到 0.008700 超时，继续标零")
+
+            print("2. 对一维力传感器通道0/1整体标零")
+            self.set_zero_loadcell(part=part, ch=0)
+            self.set_zero_loadcell(part=part, ch=1)
+            print("通道0/1已整体标零")
+
+            print()
+            print("3. 点按调整并输入标定力")
+            print("   W: 张开方向微调")
+            print("   S: 闭合方向微调")
+            print("   R: 输入当前数显推拉力计读数，并同时标定通道0/1")
+            print("   Q: 退出流程")
+            print(f"   点按步长: {self.manual_control_step:.5f}")
+
+            while True:
+                key = self._read_hidden_terminal_key()
+                if key is None:
+                    continue
+                if key in ("w", "s"):
+                    current = self._get_feedback_scalar("gripper_pos")
+                    if current is None:
+                        print("当前夹爪位置无效，无法点按")
+                        continue
+                    direction = 1.0 if key == "w" else -1.0
+                    new_pos = current + direction * self.manual_control_step
+                    self.g.robot.set_actions({gripper_part: {"type": "position", "position": [new_pos]}})
+                    print(f"\r当前位置 {current:.6f} -> 目标 {new_pos:.6f}    ", end="", flush=True)
+                elif key == "r":
+                    print()
+                    known_force = input("请输入当前数显推拉力计读数(N),回车后同时标定通道0/1: ").strip()
+                    if not known_force:
+                        continue
+                    force = float(known_force)
+                    self.g.robot.send_command(part, {"command": "calibrate_force", "index": 0, "force": force})
+                    self.g.robot.send_command(part, {"command": "calibrate_force", "index": 1, "force": force})
+                    self.g.loggerUI.info(f"{part}的通道0/1已按流程整体标定为{force}N")
+                    print(f"通道0/1已整体标定为 {force}N")
+                    break
+                elif key == "q":
+                    print("\n一维力标零与标定流程已退出")
+                    return
+
+            print("4. 自动移动夹爪到 0.010000")
+            ok = self._move_to_target(part=gripper_part, pos_name="gripper_pos", target=0.01, timeout_s=5.0)
+            if not ok:
+                self.g.loggerUI.warn("一维力标定流程: 移动到 0.010000 超时")
+                print("移动到 0.010000 超时，请人工确认夹爪位置")
+            input("标零与标定流程完成，按回车返回")
+        finally:
+            self.manual_control_step = old_step
     
     def get_limits(self,part):
         print("当前关节范围:",self.g.robot.send_command(part, {"command": "get_limit"}))

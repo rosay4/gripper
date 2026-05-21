@@ -613,26 +613,30 @@ class GripperGuide(BaseGuide):
     def task_loadcell(self):
         menu = {
             "1": {
+                "description": "一维力传感器标零与标定流程",
+                "callback": lambda: self.motion.zero_and_calibrate_loadcell_flow(part=self.selected_loadcell),
+            },
+            "2": {
                 "description": "一维力传感器整体置零",
                 "callback": lambda: self.motion.set_zero_loadcell_all(part=self.selected_loadcell),
             },
-            "2": {
+            "3": {
                 "description": "一维力传感器整体标定",
                 "callback": lambda: self.motion.calibrate_loadcell_all(part=self.selected_loadcell),
             },
-            "3": {
+            "4": {
                 "description": "一维力传感器通道0置零", 
                 "callback": lambda: self.motion.set_zero_loadcell(part=self.selected_loadcell,ch=0),
             },
-            "4": {
+            "5": {
                 "description": "一维力传感器通道1置零", 
                 "callback": lambda: self.motion.set_zero_loadcell(part=self.selected_loadcell,ch=1),
             },
-            "5":{
+            "6":{
                 "description": "一维力传感器通道0标定",
                 "callback": lambda: self.motion.calibrate_loadcell(part=self.selected_loadcell,ch=0),
             },
-            "6":{
+            "7":{
                 "description": "一维力传感器通道1标定",
                 "callback": lambda: self.motion.calibrate_loadcell(part=self.selected_loadcell,ch=1),
             },
