@@ -43,7 +43,7 @@ class MotionModule:
     def __init__(self,guide):
         self.g = guide
         self.manual_control_active = False
-        self.manual_control_step = 0.0005
+        self.manual_control_step = 0.00005
         self.max_acc = 0.1
         self.max_vel = 0.1
         self.current_output_dir = None
@@ -2877,11 +2877,11 @@ class MotionModule:
                 input("回车返回")
             return
 
-        start_pos = 0.009
+        start_pos = 0.0088
         end_pos = 0.01
         sample_count = 3
         old_step = self.manual_control_step
-        self.manual_control_step = 0.0005
+        self.manual_control_step = 0.00005
         rows = []
 
         print("=== 一维力精度测试 ===")
@@ -3147,7 +3147,7 @@ class MotionModule:
             return
 
         old_step = self.manual_control_step
-        self.manual_control_step = 0.0005
+        self.manual_control_step = 0.00005
         try:
             print("=== 一维力传感器标零与标定流程 ===")
             print("1. 自动移动夹爪到 0.008700")
