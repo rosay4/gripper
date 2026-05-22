@@ -83,6 +83,13 @@ def prepare_highfreq(highfreq):
 
 def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig="viz_multi.png", show_plot=True):
     log_dir = Path(log_dir)
+    name_for_title = str(savefig).replace("_", " ")
+    if "left gripper" in name_for_title:
+        part_title = "Left Gripper"
+    elif "right gripper" in name_for_title:
+        part_title = "Right Gripper"
+    else:
+        part_title = name_for_title
     
     # 加载数据
     lowfreq = safe_load_json(log_dir / lowfile)
@@ -190,7 +197,7 @@ def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig=
     axes[-1, 1].set_xlabel("Relative Time from First LowFreq (s)")
     
     # 总标题
-    fig.suptitle(f'Raw Data Visualization\nLowFreq: {lowfile}, HighFreq: {highfile}', 
+    fig.suptitle(f'{part_title} Raw Data Visualization\nLowFreq: {lowfile}, HighFreq: {highfile}', 
                 fontsize=12, y=1.02)
     
     plt.tight_layout()
@@ -214,6 +221,7 @@ def draw(log_dir=".", lowfile="lowfreq.json", highfile="highfreq.json", savefig=
     axv.axhline(0, color='k', lw=1, alpha=0.5)
     axv.set_xlabel("Relative Time (s)")
     axv.set_ylabel("Velocity (rad/s)")
+    axv.set_title(f"{part_title} Velocity")
     axv.grid(True, alpha=0.3)
     axv.legend(fontsize='small')
 

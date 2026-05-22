@@ -325,6 +325,7 @@ def _find_conda_env_python(env_name: str):
     home = Path.home()
     candidates.extend(
         [
+            home / "miniforge3" / "envs" / env_name / "bin" / "python",
             home / "miniconda3" / "envs" / env_name / "bin" / "python",
             home / "anaconda3" / "envs" / env_name / "bin" / "python",
         ]
