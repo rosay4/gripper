@@ -97,6 +97,26 @@ class MotionModule:
             raw = getattr(self.g.feedbackData, name, None)
         return self._coerce_scalar(raw)
 
+    def _get_loadcell_channels(self):
+        with self.g.feedback_lock:
+            force_tip = list(getattr(self.g.feedbackData, "force_tip", [None, None]))
+        ch0 = self._coerce_scalar(force_tip[0] if len(force_tip) > 0 else None)
+        ch1 = self._coerce_scalar(force_tip[1] if len(force_tip) > 1 else None)
+        return ch0, ch1
+
+    def _format_loadcell_channels(self):
+        ch0, ch1 = self._get_loadcell_channels()
+        ch0_text = "None" if ch0 is None else f"{ch0:.4f}"
+        ch1_text = "None" if ch1 is None else f"{ch1:.4f}"
+        return f"通道0={ch0_text} N, 通道1={ch1_text} N"
+
+    def _show_loadcell_channels_for(self, seconds: float, prefix: str = "当前一维力"):
+        end_time = time.monotonic() + seconds
+        while time.monotonic() < end_time:
+            print(f"\r{prefix}: {self._format_loadcell_channels()}    ", end="", flush=True)
+            time.sleep(0.1)
+        print()
+
 
     def safe_get_feedback_snapshot(self, pos_name: str = "gripper_pos"):
         with self.g.feedback_lock:
@@ -3160,6 +3180,7 @@ class MotionModule:
             self.set_zero_loadcell(part=part, ch=0)
             self.set_zero_loadcell(part=part, ch=1)
             print("通道0/1已整体标零")
+            self._show_loadcell_channels_for(1.0, prefix="标零后当前一维力")
 
             print()
             print("3. 点按调整并输入标定力")
@@ -3172,6 +3193,7 @@ class MotionModule:
             while True:
                 key = self._read_hidden_terminal_key()
                 if key is None:
+                    print(f"\r当前一维力: {self._format_loadcell_channels()}    ", end="", flush=True)
                     continue
                 if key in ("w", "s"):
                     current = self._get_feedback_scalar("gripper_pos")
@@ -3192,11 +3214,15 @@ class MotionModule:
                     self.g.robot.send_command(part, {"command": "calibrate_force", "index": 1, "force": force})
                     self.g.loggerUI.info(f"{part}的通道0/1已按流程整体标定为{force}N")
                     print(f"通道0/1已整体标定为 {force}N")
+                    print("标定后等待传感器稳定，请观察当前通道值")
+                    self._show_loadcell_channels_for(2.0, prefix="标定后当前一维力")
+                    input("确认通道0/1读数稳定且接近数显推拉力计读数后，按回车继续")
                     break
                 elif key == "q":
                     print("\n一维力标零与标定流程已退出")
                     return
 
+            input("请先移开/卸载数显推拉力计，确认安全后按回车移动到 0.010000")
             print("4. 自动移动夹爪到 0.010000")
             ok = self._move_to_target(part=gripper_part, pos_name="gripper_pos", target=0.01, timeout_s=5.0)
             if not ok:
