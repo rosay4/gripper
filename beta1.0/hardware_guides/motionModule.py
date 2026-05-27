@@ -1213,9 +1213,7 @@ class MotionModule:
         safe_no = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in gripper_no)
         tstamp = time.strftime("%Y%m%d_%H%M%S")
         prev_output_dir = self.current_output_dir
-        sn_label = getattr(self.g, "gripper_serial_label", "SN_unknown") or "SN_unknown"
-        sn_label = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(sn_label))
-        self.current_output_dir = os.path.join(project_root, "logs", sn_label, f"{safe_no}_{tstamp}")
+        self.current_output_dir = os.path.join(project_root, "logs", f"{safe_no}_{tstamp}")
         os.makedirs(self.current_output_dir, exist_ok=True)
 
         tests = [
@@ -1228,9 +1226,8 @@ class MotionModule:
         ]
 
         print("=== 基础功能自动测试开始 ===")
-        print(f"电机SN目录: {sn_label}")
         print(f"结果目录: {self.current_output_dir}")
-        self.g.loggerUI.info(f"基础功能自动测试开始 gripper={safe_no} sn={sn_label}")
+        self.g.loggerUI.info(f"基础功能自动测试开始 gripper={safe_no}")
         success = False
         try:
             for idx, (name, run_test) in enumerate(tests, start=1):

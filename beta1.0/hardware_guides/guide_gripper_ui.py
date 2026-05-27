@@ -3,16 +3,12 @@ from enum import Enum, auto
 import serial
 import serial.tools.list_ports
 import yaml
-import socket
-import struct
 from laser_indicator import LaserIndicator
 # Laser USB identifiers (from your device list)
 LASER_USB_VID = 6790
 LASER_USB_PID = 21978
 LASER_USB_SERIAL = "0123456789"
 LASER_SCAN_COOLDOWN_SEC = 2.0
-CAN_FRAME_FMT = "=IB3x8s"
-CAN_FRAME_SIZE = struct.calcsize(CAN_FRAME_FMT)
 
 class FeedbackMode(Enum):
     BASIC = auto()     # 轨迹测试 / 高频
@@ -33,8 +29,6 @@ class GripperGuide(BaseGuide):
         self._laser_next_scan = 0.0
         self._laser_last_status = None
         self._laser_pause = False
-        self.gripper_serial_number = None
-        self.gripper_serial_label = "SN_unknown"
         class FeedbackItem:
             def __init__(self):
                 self.gripper_pos = -1
@@ -56,7 +50,6 @@ class GripperGuide(BaseGuide):
                 self.laser_ports = {"left": None, "right": None}
                 self.config_length_per_radian = None
                 self.config_offset_at_hardware_zero = None
-                self.motor_sn = None
         self.feedbackData = FeedbackItem()
         self.feedback_mode = FeedbackMode.FULL
     ## 抽象方法实现
@@ -188,60 +181,6 @@ class GripperGuide(BaseGuide):
             self.feedbackData.config_length_per_radian = length_val
             self.feedbackData.config_offset_at_hardware_zero = offset_val
 
-    def _read_sdo_uint32(self, can_iface: str, node_id: int, index: int, subindex: int, timeout: float = 0.5):
-        request_can_id = 0x600 + node_id
-        response_can_id = 0x580 + node_id
-        request = bytes([0x40, index & 0xFF, (index >> 8) & 0xFF, subindex, 0, 0, 0, 0])
-        deadline = time.monotonic() + timeout
-        with socket.socket(socket.PF_CAN, socket.SOCK_RAW, socket.CAN_RAW) as sock:
-            sock.bind((can_iface,))
-            sock.send(struct.pack(CAN_FRAME_FMT, request_can_id, len(request), request))
-            while time.monotonic() < deadline:
-                sock.settimeout(max(0.01, deadline - time.monotonic()))
-                try:
-                    frame = sock.recv(CAN_FRAME_SIZE)
-                except socket.timeout:
-                    break
-                can_id, can_dlc, data = struct.unpack(CAN_FRAME_FMT, frame[:CAN_FRAME_SIZE])
-                data = data[:can_dlc]
-                if can_id != response_can_id or len(data) < 8:
-                    continue
-                if data[0] == 0x80 and data[1] == request[1] and data[2] == request[2] and data[3] == subindex:
-                    abort_code = int.from_bytes(data[4:8], "little")
-                    raise RuntimeError(f"SDO abort 0x{abort_code:08X}")
-                if data[0] == 0x43 and data[1] == request[1] and data[2] == request[2] and data[3] == subindex:
-                    return int.from_bytes(data[4:8], "little")
-        raise TimeoutError(f"timeout reading SDO 0x{index:04X}:{subindex:02X} from node {node_id} on {can_iface}")
-
-    def _read_selected_gripper_sn(self, yaml_path: str):
-        node_id = None
-        try:
-            with open(yaml_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-            ids = data.get("ids") or []
-            if ids:
-                node_id = int(ids[0])
-        except Exception as e:
-            self.loggerUI.warn(f"read gripper node id failed: {e}")
-
-        if node_id is None:
-            self.gripper_serial_number = None
-            self.gripper_serial_label = "SN_unknown"
-            self.loggerUI.warn("motor SN skipped: gripper ids[0] not found")
-            return
-
-        try:
-            sn = self._read_sdo_uint32("can0", node_id, 0x1018, 0x04)
-            self.gripper_serial_number = sn
-            self.gripper_serial_label = f"SN_{sn}"
-            with self.feedback_lock:
-                self.feedbackData.motor_sn = sn
-            self.loggerUI.info(f"motor SN read: node={node_id}, sn={sn}")
-        except Exception as e:
-            self.gripper_serial_number = None
-            self.gripper_serial_label = "SN_unknown"
-            self.loggerUI.warn(f"motor SN read failed: node={node_id}, err={e}")
-
     def _load_config(self):
         opts = ["left_gripper","right_gripper"]
         opts_loadcell = ["left_loadcell","right_loadcell"]
@@ -305,7 +244,6 @@ class GripperGuide(BaseGuide):
         self.loggerUI.info(f"已选择夹爪: {self.selected_gripper}")
         self.loggerUI.info(f"已加载配置文件: {gripper_path}, {loadcell_path}, {force_sensor_path}")
         self._sync_gripper_yaml_config_to_feedback()
-        self._read_selected_gripper_sn(gripper_path)
         self._init_lasers()
 
     def _rebuild_config_from_selected(self):
