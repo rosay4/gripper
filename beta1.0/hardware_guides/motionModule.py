@@ -979,13 +979,13 @@ class MotionModule:
     def _cleanup_auto_output_artifacts(self, out_dir: str):
         if not out_dir or not os.path.isdir(out_dir):
             return
-        transient_keywords = ("viz", "tmp", "temp", "highfreq", "lowfreq")
+        transient_keywords = ("viz", "tmp", "temp")
         for path in Path(out_dir).iterdir():
             if not path.is_file():
                 continue
             name = path.name.lower()
-            should_delete = path.suffix.lower() == ".png" or (
-                path.suffix.lower() == ".json" and any(key in name for key in transient_keywords)
+            should_delete = path.suffix.lower() in (".png", ".json") and any(
+                key in name for key in transient_keywords
             )
             if not should_delete:
                 continue
@@ -1223,6 +1223,7 @@ class MotionModule:
             ("一维力精度", lambda: self.one_dim_force_accuracy_test(part=self.g.selected_loadcell, wait_for_return=False)),
             ("阶跃响应测试", lambda: self.step_response_auto_test(part=part, pos_name=pos_name)),
             ("轨迹跟踪测试", lambda: self.topp_tracking_auto_test(part=part, pos_name=pos_name)),
+            ("堵转抓取稳定测试", lambda: self.grasp_test(part=part, pos_name=pos_name)),
         ]
 
         print("=== 基础功能自动测试开始 ===")
@@ -3713,7 +3714,9 @@ class MotionModule:
 
             confirm = input("是否保存日志? (y/n): ").strip().lower()
             if confirm == "y":
-                self.g.logger._save_logs(part)
+                highfreq_filename, lowfreq_filename, _ = self.g.logger._save_logs(part)
+                self._move_log_file_to_output_dir(highfreq_filename)
+                self._move_log_file_to_output_dir(lowfreq_filename)
 
             print("[堵转测试步骤3] 移动夹爪到未抓取/堵转状态位置")
             self._run_point_without_hide(q_name="gripper_pos",dof=1,part=part)
@@ -3732,7 +3735,7 @@ class MotionModule:
             if fig is not None:
                 try:
                     tstamp = time.strftime("%Y%m%d_%H%M%S")
-                    save_path = f"{project_root}/logs/grasp_test_{tstamp}_{part}.png"
+                    save_path = os.path.join(self._get_output_dir(), f"grasp_test_{tstamp}_{part}.png")
                     fig.savefig(save_path, dpi=200, bbox_inches='tight')
                     print(f"图已保存: {save_path}")
                 except Exception as e:
