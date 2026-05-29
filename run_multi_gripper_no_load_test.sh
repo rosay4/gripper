@@ -3,7 +3,7 @@ set -e
 
 # -------- configuration --------
 ENV_NAME="gripper_test"
-PLOT_ENV_NAME="pyqt6_env"
+PLOT_ENV_NAME="gripper_test"
 SCRIPT_NAME="beta1.0/hardware_guides/multi_gripper_no_load_test.py"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,7 +15,9 @@ echo
 
 # -------- locate conda base --------
 if [[ -z "$CONDA_EXE" ]]; then
-    if [[ -d "$HOME/miniconda3" ]]; then
+    if [[ -d "$HOME/miniforge3" ]]; then
+        CONDA_BASE="$HOME/miniforge3"
+    elif [[ -d "$HOME/miniconda3" ]]; then
         CONDA_BASE="$HOME/miniconda3"
     elif [[ -d "$HOME/anaconda3" ]]; then
         CONDA_BASE="$HOME/anaconda3"

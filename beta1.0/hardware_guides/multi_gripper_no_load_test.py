@@ -388,7 +388,7 @@ def parse_args():
     )
     parser.add_argument(
         "--plot-env",
-        default="pyqt6_env",
+        default="gripper_test",
         help="Conda environment used to generate plots.",
     )
     parser.add_argument(
