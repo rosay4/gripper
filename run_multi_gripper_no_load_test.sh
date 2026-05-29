@@ -49,7 +49,7 @@ if [[ -x "$PLOT_ENV_PYTHON" ]]; then
     else
         echo "Plot environment exists but matplotlib is missing:"
         echo "  $PLOT_ENV_PYTHON"
-        echo "  Install it with: conda activate $PLOT_ENV_NAME && conda install matplotlib"
+        echo "  Install it with: conda activate $PLOT_ENV_NAME && conda install -c conda-forge matplotlib openpyxl pillow"
         PLOT_ARGS=(--no-plot)
     fi
 else
